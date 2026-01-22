@@ -13,10 +13,17 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.1.2
+版本: 1.2.0
 Python: 3.8+
 
 版本歷史:
+- v1.2.0: 整合賽特一功能與優化
+  * 整合 autoslet.py 的規則系統（支援 a/s/f 三種規則類型）
+  * 優先使用 ChromeDriverManager 自動管理驅動程式
+  * 更新遊戲供應商選擇器（支援動態 class 定位）
+  * 擴展 BetRule 支援自動旋轉、標準規則、購買免費遊戲
+  * 移除 WindowSizeLocker，允許用戶自由調整視窗大小
+  * ConfigReader 支援解析多種規則格式
 - v1.1.2: 瀏覽器建立時即固定視窗大小
   * create_browser_context 自動啟動 WindowSizeLocker 監控
   * 瀏覽器關閉時自動停止視窗監控執行緒
@@ -88,7 +95,6 @@ __all__ = [
     'LoggerFactory',
     # 輔助類別
     'BrowserHelper',
-    'WindowSizeLocker',
     # 主要類別
     'ConfigReader',
     'BrowserManager',
@@ -235,6 +241,10 @@ def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLO
 
 class Constants:
     """系統常量"""
+    # 版本資訊
+    VERSION = "1.2.0"
+    SYSTEM_NAME = "威樂賽特二遊戲自動化系統"
+    
     DEFAULT_LIB_PATH = "lib"
     DEFAULT_CREDENTIALS_FILE = "用戶資料.txt"
     DEFAULT_RULES_FILE = "用戶規則.txt"
@@ -252,6 +262,7 @@ class Constants:
     
     # URL 配置
     LOGIN_PAGE = "https://www.welove999.com/login?id=login"
+    GAME_CATEGORY_URL = "https://www.welove999.com/game?type=slot&code=BNG&id=all"
     
     # 頁面元素選擇器
     USERNAME_INPUT = "//input[@placeholder='請輸入會員帳號']"
@@ -259,9 +270,8 @@ class Constants:
     LOGIN_BUTTON = "/html/body/div[1]/div/div[1]/div/div/div[2]/div[4]/div[2]"
     
     # 遊戲導航選擇器
-    GAME_CATEGORY_URL = "https://www.welove999.com/game?type=slot&code=BNG&id=all"
-    GAME_PROVIDER_BUTTON = "/html/body/div/div/div[2]/div/div/div[1]/div[8]/div[1]"
-    START_GAME_BUTTON = "//*[@id='gameList']/div[2]/div[2]/button"
+    GAME_PROVIDER_BUTTON = "//div[contains(@class, 'bg-white') and contains(@class, 'rounded-full') and .//img[@src='/img/factory/ATG.png']]"
+    START_GAME_BUTTON = "/html/body/div/div/div[3]/div[2]/div/div[4]/div[2]/button/div"
     
     GAME_CANVAS = "GameCanvas"
     
@@ -269,7 +279,6 @@ class Constants:
     IMAGE_DIR = "img"
     LOBBY_LOGIN = "lobby_login.png"
     LOBBY_CONFIRM = "lobby_confirm.png"
-    ERROR_MESSAGE = "error_message.png"
     MATCH_THRESHOLD = 0.8  # 圖片匹配閾值
     BETSIZE_MATCH_THRESHOLD = 0.85  # 金額識別匹配閾值
     DETECTION_INTERVAL = 1.0  # 檢測間隔（秒）
@@ -328,6 +337,8 @@ class Constants:
     STOP_EVENT_ERROR_WAIT = 1.0    # 停止事件錯誤等待時間
     SERVER_SOCKET_TIMEOUT = 1.0    # 伺服器 Socket 超時時間
     CLEANUP_PROCESS_TIMEOUT = 10   # 清除程序超時時間（秒）
+    AUTO_SKIP_CLICK_INTERVAL = 60  # 自動跳過點擊間隔時間（秒）
+    RULE_EXECUTION_TIME_CHECK_INTERVAL = 10  # 規則執行時間檢查間隔（秒）
     
     # 重試與循環配置
     BETSIZE_ADJUST_MAX_ATTEMPTS = 200  # 調整金額最大嘗試次數
@@ -348,13 +359,6 @@ class Constants:
     BETSIZE_DECREASE_BUTTON_Y_RATIO = 0.89    # 減少金額按鈕 Y 座標比例
     BETSIZE_DISPLAY_X_RATIO = 0.71          # 金額顯示位置 X 座標比例
     BETSIZE_DISPLAY_Y_RATIO = 0.89            # 金額顯示位置 Y 座標比例
-
-    # 錯誤訊息圖片識別座標（基於預設視窗大小）
-    ERROR_MESSAGE_LEFT_X = 240  # 左側錯誤訊息區域 X 座標
-    ERROR_MESSAGE_LEFT_Y = 190  # 左側錯誤訊息區域 Y 座標
-    ERROR_MESSAGE_RIGHT_X = 360  # 右側錯誤訊息區域 X 座標
-    ERROR_MESSAGE_RIGHT_Y = 190   # 右側錯誤訊息區域 Y 座標
-    ERROR_MESSAGE_PERSIST_SECONDS = 1  # 錯誤訊息持續秒數閾值
 
     # 截圖裁切範圍（像素，Retina 顯示器會自動 2 倍縮放）
     BETSIZE_CROP_MARGIN_X = 150   # 金額模板水平裁切邊距（實際 300px）
@@ -403,24 +407,49 @@ class UserCredential:
 
 @dataclass(frozen=True)
 class BetRule:
-    """下注規則資料結構（不可變）。"""
+    """下注規則資料結構（不可變）。
+    
+    支援三種類型:
+    - 'a' (自動旋轉): amount, spin_count
+    - 's' (標準規則): amount, duration, min_seconds, max_seconds
+    - 'f' (購買免費遊戲): amount
+    """
+    rule_type: str  # 'a'、's' 或 'f'
     amount: float
-    duration: int  # 分鐘
-    min_seconds: float  # 最小間隔秒數
-    max_seconds: float  # 最大間隔秒數
+    spin_count: Optional[int] = None  # 'a' 類型使用
+    duration: Optional[int] = None  # 's' 類型使用（分鐘）
+    min_seconds: Optional[float] = None  # 's' 類型使用
+    max_seconds: Optional[float] = None  # 's' 類型使用
     
     def __post_init__(self) -> None:
         """驗證資料完整性"""
         if self.amount <= 0:
             raise ValueError(f"下注金額必須大於 0: {self.amount}")
-        if self.duration <= 0:
-            raise ValueError(f"持續時間必須大於 0: {self.duration}")
-        if self.min_seconds <= 0:
-            raise ValueError(f"最小間隔秒數必須大於 0: {self.min_seconds}")
-        if self.max_seconds <= 0:
-            raise ValueError(f"最大間隔秒數必須大於 0: {self.max_seconds}")
-        if self.min_seconds > self.max_seconds:
-            raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
+        
+        if self.rule_type == 'a':
+            # 自動旋轉規則驗證
+            if self.spin_count is None:
+                raise ValueError("自動旋轉規則必須指定次數")
+            if self.spin_count not in [10, 50, 100]:
+                raise ValueError(f"自動旋轉次數必須是 10、50 或 100: {self.spin_count}")
+        
+        elif self.rule_type == 's':
+            # 標準規則驗證
+            if self.duration is None or self.duration <= 0:
+                raise ValueError(f"持續時間必須大於 0: {self.duration}")
+            if self.min_seconds is None or self.min_seconds <= 0:
+                raise ValueError(f"最小間隔秒數必須大於 0: {self.min_seconds}")
+            if self.max_seconds is None or self.max_seconds <= 0:
+                raise ValueError(f"最大間隔秒數必須大於 0: {self.max_seconds}")
+            if self.min_seconds > self.max_seconds:
+                raise ValueError(f"最小間隔不能大於最大間隔: {self.min_seconds} > {self.max_seconds}")
+        
+        elif self.rule_type == 'f':
+            # 購買免費遊戲規則驗證（只需要金額）
+            pass
+        
+        else:
+            raise ValueError(f"不支援的規則類型: {self.rule_type}，必須是 'a'、's' 或 'f'")
 
 
 @dataclass(frozen=True)
@@ -831,7 +860,10 @@ class ConfigReader:
     ) -> List[BetRule]:
         """讀取下注規則檔案。
         
-        檔案格式: 金額:時間(分鐘):最小(秒數):最大(秒數) (首行為標題)
+        支援三種規則格式:
+        - a:金額:次數 (自動旋轉, 次數為 10/50/100)
+        - s:金額:時間(分鐘):最小(秒數):最大(秒數) (標準規則)
+        - f:金額 (購買免費遊戲)
         
         Args:
             filename: 檔案名稱
@@ -849,21 +881,53 @@ class ConfigReader:
             try:
                 parts = line.split(':')
                 
-                if len(parts) < 4:
+                if len(parts) < 2:
                     self.logger.warning(f"第 {line_number} 行格式不完整 已跳過 {line}")
                     continue
                 
-                amount = float(parts[0].strip())
-                duration = int(parts[1].strip())
-                min_seconds = float(parts[2].strip())
-                max_seconds = float(parts[3].strip())
+                rule_type = parts[0].strip().lower()
                 
-                rules.append(BetRule(
-                    amount=amount, 
-                    duration=duration,
-                    min_seconds=min_seconds,
-                    max_seconds=max_seconds
-                ))
+                if rule_type == 'a':
+                    # 自動旋轉規則: a:金額:次數
+                    if len(parts) < 3:
+                        self.logger.warning(f"第 {line_number} 行自動旋轉規則格式不完整 已跳過 {line}")
+                        continue
+                    amount = float(parts[1].strip())
+                    spin_count = int(parts[2].strip())
+                    rules.append(BetRule(
+                        rule_type='a',
+                        amount=amount,
+                        spin_count=spin_count
+                    ))
+                
+                elif rule_type == 's':
+                    # 標準規則: s:金額:時間(分鐘):最小(秒數):最大(秒數)
+                    if len(parts) < 5:
+                        self.logger.warning(f"第 {line_number} 行標準規則格式不完整 已跳過 {line}")
+                        continue
+                    amount = float(parts[1].strip())
+                    duration = int(parts[2].strip())
+                    min_seconds = float(parts[3].strip())
+                    max_seconds = float(parts[4].strip())
+                    rules.append(BetRule(
+                        rule_type='s',
+                        amount=amount,
+                        duration=duration,
+                        min_seconds=min_seconds,
+                        max_seconds=max_seconds
+                    ))
+                
+                elif rule_type == 'f':
+                    # 購買免費遊戲規則: f:金額
+                    amount = float(parts[1].strip())
+                    rules.append(BetRule(
+                        rule_type='f',
+                        amount=amount
+                    ))
+                
+                else:
+                    self.logger.warning(f"第 {line_number} 行規則類型不支援: {rule_type} 已跳過 {line}")
+                    continue
                 
             except (ValueError, IndexError) as e:
                 self.logger.warning(f"第 {line_number} 行無法解析 {e}")
@@ -1349,8 +1413,8 @@ class BrowserManager:
     ) -> WebDriver:
         """建立 WebDriver 實例（優化版）。
         
-        優先使用專案內的驅動程式檔案，
-        若失敗則嘗試使用 WebDriver Manager 自動管理作為備援。
+        優先使用 ChromeDriverManager 自動管理，
+        若失敗則嘗試使用專案內的驅動程式檔案作為備援。
         
         Args:
             local_proxy_port: 本機 proxy 中繼埠號（可選）
@@ -1365,26 +1429,24 @@ class BrowserManager:
         driver = None
         errors = []
         
-        # 方法 1: 優先使用專案內的驅動程式檔案
+        # 方法 1: 優先使用 ChromeDriverManager 自動管理
         try:
-            driver = self._create_webdriver_with_local_driver(chrome_options)
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            self.logger.info("✓ 使用 ChromeDriverManager 成功建立瀏覽器")
             
-        except FileNotFoundError as e:
-            errors.append(f"本機驅動程式: {e}")
-            self.logger.warning(f"本機驅動程式不存在，嘗試使用 WebDriver Manager")
+        except Exception as e:
+            errors.append(f"ChromeDriverManager: {e}")
+            self.logger.warning(f"ChromeDriverManager 失敗，嘗試使用本機驅動程式: {e}")
             
-            # 方法 2: 使用 WebDriver Manager 自動管理
+            # 方法 2: 備援使用專案內的驅動程式檔案
             try:
-                service = Service(ChromeDriverManager().install())
-                driver = webdriver.Chrome(service=service, options=chrome_options)
+                driver = self._create_webdriver_with_local_driver(chrome_options)
+                self.logger.info("✓ 使用本機驅動程式成功建立瀏覽器")
                 
             except Exception as e2:
-                errors.append(f"WebDriver Manager: {e2}")
-                self.logger.error(f"WebDriver Manager 也失敗: {e2}")
-        
-        except Exception as e:
-            errors.append(f"本機驅動程式: {e}")
-            self.logger.warning(f"本機驅動程式失敗，嘗試備援方案: {e}")
+                errors.append(f"本機驅動程式: {e2}")
+                self.logger.error(f"本機驅動程式也失敗: {e2}")
         
         if driver is None:
             error_message = "無法建立瀏覽器實例。\n" + "\n".join(f"- {error}" for error in errors)
@@ -1484,17 +1546,8 @@ class BrowserManager:
             BrowserCreationError: 建立失敗
         """
         driver = None
-        size_locker = None
         try:
             driver = self.create_webdriver(local_proxy_port=proxy_port)
-            
-            # 立即啟動視窗大小鎖定器
-            size_locker = WindowSizeLocker(
-                driver, 
-                Constants.DEFAULT_WINDOW_WIDTH, 
-                Constants.DEFAULT_WINDOW_HEIGHT
-            )
-            size_locker.start()
             
             context = BrowserContext(
                 driver=driver,
@@ -1502,16 +1555,10 @@ class BrowserManager:
                 index=index,
                 proxy_port=proxy_port
             )
-            # 將 size_locker 附加到 context，供後續使用
-            context.size_locker = size_locker
             
             yield context
         finally:
-            # 先停止視窗監控
-            if size_locker:
-                with suppress(Exception):
-                    size_locker.stop()
-            # 再關閉瀏覽器
+            # 關閉瀏覽器
             if driver:
                 with suppress(Exception):
                     driver.quit()
@@ -1969,12 +2016,12 @@ class SyncBrowserOperator:
         columns: int = Constants.DEFAULT_WINDOW_COLUMNS,
         timeout: Optional[float] = None
     ) -> List[OperationResult]:
-        """調整所有瀏覽器視窗大小（預設 1280x720）。
+        """調整所有瀏覽器視窗大小（預設 600x400）。
         
         Args:
             browser_contexts: 瀏覽器上下文列表
-            width: 視窗寬度（預設 1280）
-            height: 視窗高度（預設 720）
+            width: 視窗寬度（預設 600）
+            height: 視窗高度（預設 400）
             columns: 已棄用，保留參數以維持相容性
             timeout: 超時時間
             
@@ -1982,14 +2029,8 @@ class SyncBrowserOperator:
             操作結果列表
         """
         def resize_operation(context: BrowserContext, index: int, total: int) -> bool:
-            # 只調整視窗大小，不再排列位置
+            # 只調整視窗大小，不再排列位置或鎖定大小
             context.driver.set_window_size(width, height)
-            
-            # 啟動視窗大小鎖定器
-            if not hasattr(context, 'size_locker'):
-                context.size_locker = WindowSizeLocker(context.driver, width, height)
-                context.size_locker.start()
-            
             return True
         
         return self.execute_sync(
@@ -2359,71 +2400,6 @@ class SyncBrowserOperator:
 # ============================================================================
 # 瀏覽器操作輔助類
 # ============================================================================
-
-class WindowSizeLocker:
-    """視窗大小鎖定器。
-    
-    持續監控並鎖定瀏覽器視窗大小，防止使用者或系統改變視窗尺寸。
-    使用背景執行緒定期檢查視窗大小，如果不符合目標則自動調整。
-    
-    Attributes:
-        driver: WebDriver 實例
-        target_width: 目標視窗寬度
-        target_height: 目標視窗高度
-        interval: 檢查間隔（秒）
-        running: 是否正在執行
-        thread: 背景執行緒
-    """
-    
-    def __init__(
-        self, 
-        driver: WebDriver, 
-        target_width: int = Constants.DEFAULT_WINDOW_WIDTH, 
-        target_height: int = Constants.DEFAULT_WINDOW_HEIGHT, 
-        interval: float = 0.5
-    ):
-        """初始化視窗大小鎖定器。
-        
-        Args:
-            driver: WebDriver 實例
-            target_width: 目標視窗寬度（預設 1280）
-            target_height: 目標視窗高度（預設 720）
-            interval: 檢查間隔秒數（預設 0.5）
-        """
-        self.driver = driver
-        self.target_width = target_width
-        self.target_height = target_height
-        self.interval = interval
-        self.running = False
-        self.thread: Optional[threading.Thread] = None
-    
-    def _monitor(self) -> None:
-        """監控視窗大小並自動修正（背景執行緒）"""
-        while self.running:
-            try:
-                current_size = self.driver.get_window_size()
-                if (current_size['width'] != self.target_width or 
-                    current_size['height'] != self.target_height):
-                    self.driver.set_window_size(self.target_width, self.target_height)
-                    print(f"🔄 視窗大小已重置為 {self.target_width}x{self.target_height}")
-            except:
-                # 忽略錯誤，可能是瀏覽器已關閉
-                pass
-            time.sleep(self.interval)
-    
-    def start(self) -> None:
-        """啟動視窗大小監控"""
-        if not self.running:
-            self.running = True
-            self.thread = threading.Thread(target=self._monitor, daemon=True)
-            self.thread.start()
-    
-    def stop(self) -> None:
-        """停止視窗大小監控"""
-        self.running = False
-        if self.thread:
-            self.thread.join(timeout=1)
-
 
 class BrowserHelper:
     """瀏覽器操作輔助類別。
