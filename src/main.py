@@ -261,8 +261,8 @@ class Constants:
     PROXY_SELECT_TIMEOUT = 1.0
     
     # URL 配置
-    LOGIN_PAGE = "https://www.welove999.com/login?id=login"
-    GAME_CATEGORY_URL = "https://www.welove999.com/game?type=slot&code=BNG&id=all"
+    LOGIN_PAGE = "https://www.welove777.com/login?id=login"
+    GAME_CATEGORY_URL = "https://www.welove777.com/game?type=slot&code=ZW&id=all"
     
     # 頁面元素選擇器
     USERNAME_INPUT = "//input[@placeholder='請輸入會員帳號']"
@@ -271,7 +271,7 @@ class Constants:
     
     # 遊戲導航選擇器
     GAME_PROVIDER_BUTTON = "//div[contains(@class, 'bg-white') and contains(@class, 'rounded-full') and .//img[@src='/img/factory/ATG.png']]"
-    START_GAME_BUTTON = "/html/body/div/div/div[3]/div[2]/div/div[4]/div[2]/button/div"
+    START_GAME_BUTTON = "//img[@alt='戰神賽特2覺醒之力']/ancestor::div[contains(@class, 'card')]//button[contains(@class, 'btn')]"
     
     GAME_CANVAS = "GameCanvas"
     
