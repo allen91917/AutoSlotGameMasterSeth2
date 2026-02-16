@@ -13,10 +13,15 @@
 - 完善的錯誤處理與重試機制
 
 作者: 凡臻科技
-版本: 1.2.0
+版本: 1.2.1
 Python: 3.8+
 
 版本歷史:
+- v1.2.1: 更新遊戲平台與選擇器
+  * 更新登入頁面 URL 為 welove777.com
+  * 更新遊戲分類 URL（slot&code=ZW）
+  * 優化遊戲按鈕選擇器（使用圖片 alt 屬性定位）
+  * 改用語意化 XPath 提升穩定性
 - v1.2.0: 整合賽特一功能與優化
   * 整合 autoslet.py 的規則系統（支援 a/s/f 三種規則類型）
   * 優先使用 ChromeDriverManager 自動管理驅動程式
@@ -242,7 +247,7 @@ def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLO
 class Constants:
     """系統常量"""
     # 版本資訊
-    VERSION = "1.2.0"
+    VERSION = "1.2.1"
     SYSTEM_NAME = "威樂賽特二遊戲自動化系統"
     
     DEFAULT_LIB_PATH = "lib"
