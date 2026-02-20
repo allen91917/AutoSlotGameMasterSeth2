@@ -186,56 +186,78 @@ class Constants:
     DEFAULT_WINDOW_COLUMNS: int = 4
     
     # =========================================================================
-    # URL 配置
+    # 代理商配置
     # =========================================================================
-    LOGIN_PAGE: str = "https://www.welove777.com/login?id=login"
-    GAME_CATEGORY_URL: str = "https://www.welove777.com/game?type=slot&code=ZW&id=all"
+    # TODO: 更新為正式代理商網址
+    LOGIN_PAGE: str = "https://www.fin88.app/"
+    # LOGIN_PAGE: str = "https://richpanda.vip"  # --- IGNORE ---
+
+    # =========================================================================
+    # 遊戲配置
+    # =========================================================================
+    # TODO: 遊戲種類選擇：True = 賽特一, False = 賽特二
+    IS_SETTE_1: bool = True
+    # IS_SETTE_1: bool = False  # --- IGNORE ---
+    
+    # 遊戲識別碼（根據版本自動設定）
+    GAME_PATTERN_SETTE_1: str = "ATG-egyptian-mythology"
+    GAME_PATTERN_SETTE_2_FIN88: str = "feb91c659e820a0405aabc1520c24d12"
+    GAME_PATTERN_SETTE_2_RICHPANDA: str = "af48d779dc07d08d07a526d0076db801"
+    
+    @classmethod
+    def get_game_pattern(cls) -> str:
+        """取得當前遊戲種類的識別碼。"""
+        if cls.IS_SETTE_1:
+            return cls.GAME_PATTERN_SETTE_1
+        else:
+            # 根據 LOGIN_PAGE 決定 sett2 的識別碼
+            if "richpanda" in cls.LOGIN_PAGE.lower():
+                return cls.GAME_PATTERN_SETTE_2_RICHPANDA
+            return cls.GAME_PATTERN_SETTE_2_FIN88
     
     # =========================================================================
-    # 頁面元素選擇器
+    # 登入相關 XPath
     # =========================================================================
-    USERNAME_INPUT: str = "//input[@placeholder='請輸入會員帳號']"
-    PASSWORD_INPUT: str = "//input[@placeholder='請輸入密碼']"
-    LOGIN_BUTTON: str = "/html/body/div[1]/div/div[1]/div/div/div[2]/div[4]/div[2]"
+    INITIAL_LOGIN_BUTTON: str = (
+        "//button[contains(@class, 'btn') and contains(@class, 'login') "
+        "and contains(@class, 'pc') and text()='登入']"
+    )
+    USERNAME_INPUT: str = "//input[@placeholder='請輸入帳號/手機號']"
+    PASSWORD_INPUT: str = "//input[@placeholder='請輸入您的登入密碼']"
+    LOGIN_BUTTON: str = (
+        "//button[contains(@class, 'custom-button') and @type='submit' "
+        "and (text()='登入遊戲' or .//span[text()='登入遊戲'])]"
+    )
     
     # =========================================================================
-    # 遊戲導航選擇器
+    # 遊戲頁面相關 XPath
     # =========================================================================
-    GAME_PROVIDER_BUTTON: str = "//div[contains(@class, 'bg-white') and contains(@class, 'rounded-full') and .//img[@src='/img/factory/ATG.png']]"
-    START_GAME_BUTTON: str = "//img[@alt='戰神賽特2覺醒之力']/ancestor::div[contains(@class, 'card')]//button[contains(@class, 'btn')]"
-    
+    GAME_IFRAME: str = "//iframe[contains(@class, 'iframe-item')]"
     GAME_CANVAS: str = "GameCanvas"
     
     # =========================================================================
     # 圖片檢測配置
     # =========================================================================
     IMAGE_DIR: str = "img"
-    LOBBY_LOGIN: str = "lobby_login.png"
-    LOBBY_CONFIRM: str = "lobby_confirm.png"
-    # 別名（兼容舊代碼）
-    GAME_LOGIN: str = "lobby_login.png"
-    GAME_CONFIRM: str = "lobby_confirm.png"
-    MATCH_THRESHOLD: float = 0.8  # 圖片匹配閾值
-    BETSIZE_MATCH_THRESHOLD: float = 0.85  # 金額識別匹配閾值
-    DETECTION_INTERVAL: float = 1.0  # 檢測間隔（秒）
-    MAX_DETECTION_ATTEMPTS: int = 60  # 最大檢測次數
+    GAME_LOGIN: str = "遊戲登入.png"
+    GAME_CONFIRM: str = "遊戲開始.png"
+    MATCH_THRESHOLD: float = 0.8
+    DETECTION_INTERVAL: float = 1.0
+    MAX_DETECTION_ATTEMPTS: int = 60
+    DETECTION_PROGRESS_INTERVAL: int = 20
+    RECOVERY_DETECTION_ATTEMPTS: int = 30  # 恢復流程檢測最大次數
     
     # =========================================================================
-    # Canvas 動態計算比例（用於點擊座標）
+    # Canvas 點擊座標比例
     # =========================================================================
-    # lobby_login 按鈕座標比例
-    LOBBY_LOGIN_BUTTON_X_RATIO: float = 0.50  # lobby_login 開始遊戲按鈕 X 座標比例
-    LOBBY_LOGIN_BUTTON_Y_RATIO: float = 0.90  # lobby_login 開始遊戲按鈕 Y 座標比例
+    GAME_LOGIN_BUTTON_X_RATIO: float = 0.5
+    GAME_LOGIN_BUTTON_Y_RATIO: float = 0.9
+    GAME_CONFIRM_BUTTON_X_RATIO: float = 0.74
+    GAME_CONFIRM_BUTTON_Y_RATIO: float = 0.85
     
-    # lobby_confirm 按鈕座標比例
-    LOBBY_CONFIRM_BUTTON_X_RATIO: float = 0.75  # lobby_confirm 確認按鈕 X 座標比例
-    LOBBY_CONFIRM_BUTTON_Y_RATIO: float = 0.86  # lobby_confirm 確認按鈕 Y 座標比例
-    
-    # 別名（兼容舊代碼）
-    GAME_LOGIN_BUTTON_X_RATIO: float = 0.50
-    GAME_LOGIN_BUTTON_Y_RATIO: float = 0.90
-    GAME_CONFIRM_BUTTON_X_RATIO: float = 0.75
-    GAME_CONFIRM_BUTTON_Y_RATIO: float = 0.86
+    # 自動跳過點擊座標比例（關閉按鈕）
+    AUTO_SKIP_CLICK_X_RATIO: float = 0.5
+    AUTO_SKIP_CLICK_Y_RATIO: float = 0.72
     
     # =========================================================================
     # 自動旋轉按鈕座標比例
@@ -1399,9 +1421,9 @@ class ConfigReader:
             有效的規則列表
         """
         rules = []
-        lines = self._read_file_lines(filename, skip_header=True)
+        lines = self._read_file_lines(filename, skip_header=False)
         
-        for line_number, line in enumerate(lines, start=2):  # +2 因為跳過標題
+        for line_number, line in enumerate(lines, start=1):
             try:
                 # 跳過空行和註釋行（# 開頭）
                 stripped_line = line.strip()
@@ -2696,34 +2718,16 @@ class BrowserManager:
         )
         chrome_options.add_experimental_option('useAutomationExtension', False)
         
-        # 偏好設定 - 完全禁用密碼管理和外洩檢查
+        # 偏好設定
         chrome_options.add_experimental_option("prefs", {
-            # 禁用密碼管理器
             "credentials_enable_service": False,
             "profile.password_manager_enabled": False,
-            "password_manager_enabled": False,
-            
-            # 禁用自動填充
-            "autofill.profile_enabled": False,
-            "autofill.credit_card_enabled": False,
-            
-            # 禁用密碼外洩檢查
-            "profile.password_manager_leak_detection": False,
-            "safety_check.passwords_leak_detection_enabled": False,
-            
-            # 其他設定
             "profile.default_content_setting_values.notifications": 2,
             "profile.default_content_settings.popups": 0,
             "profile.content_settings.exceptions.sound": {
                 "*": {"setting": 2}
-            },
+            }
         })
-        
-        # 額外參數來關閉所有密碼相關功能
-        chrome_options.add_argument("--disable-save-password-bubble")
-        chrome_options.add_argument("--password-store=basic")
-        chrome_options.add_argument("--disable-features=PasswordLeakDetection")
-        chrome_options.add_argument("--disable-features=SafeBrowsingEnhanced")
         
         return chrome_options
     
@@ -4420,11 +4424,13 @@ class GameControlCenter:
         供 _execute_buy_free_game_for_all 和 _handle_free_game_command 使用。
         
         參數:
-            free_game_type: 免費遊戲類別（賽特二：1=免費遊戲, 2=覺醒之力, 3=不朽覺醒）
+            free_game_type: 免費遊戲類別
             
         回傳:
             任務函數
         """
+        is_sette_1 = Constants.IS_SETTE_1
+        
         def buy_free_game_task(context: BrowserContext) -> bool:
             """在單個瀏覽器中購買免費遊戲。"""
             driver = context.driver
@@ -4441,8 +4447,10 @@ class GameControlCenter:
             )
             time.sleep(Constants.FREE_GAME_CLICK_WAIT)
             
-            # 第二次點擊：確認按鈕（賽特二：根據類型選擇座標）
-            confirm_x_ratio, confirm_y_ratio = self._get_free_game_confirm_coords(free_game_type)
+            # 第二次點擊：確認按鈕（根據遊戲類型選擇座標）
+            confirm_x_ratio, confirm_y_ratio = self._get_free_game_confirm_coords(
+                is_sette_1, free_game_type
+            )
             
             BrowserHelper.click_canvas_position(
                 driver, rect,
@@ -4460,16 +4468,22 @@ class GameControlCenter:
 
     def _get_free_game_confirm_coords(
         self, 
+        is_sette_1: bool, 
         free_game_type: Optional[int]
     ) -> Tuple[float, float]:
-        """取得免費遊戲確認按鈕座標（賽特二專用）。
+        """取得免費遊戲確認按鈕座標（DRY 抽取）。
         
         參數:
-            free_game_type: 免費遊戲類別（1=免費遊戲, 2=覺醒之力, 3=不朽覺醒）
+            is_sette_1: 是否為賽特一
+            free_game_type: 免費遊戲類別
             
         回傳:
             (x_ratio, y_ratio) 座標比例
         """
+        if is_sette_1:
+            return (Constants.BUY_FREE_GAME_CONFIRM_X_RATIO, 
+                    Constants.BUY_FREE_GAME_CONFIRM_Y_RATIO)
+        
         # 賽特二：根據類別選擇座標
         if free_game_type == 3:
             return (Constants.BUY_FREE_GAME_IMMORTAL_AWAKE_X_RATIO,
@@ -4477,7 +4491,7 @@ class GameControlCenter:
         elif free_game_type == 2:
             return (Constants.BUY_FREE_GAME_AWAKE_POWER_X_RATIO,
                     Constants.BUY_FREE_GAME_AWAKE_POWER_Y_RATIO)
-        else:  # 預設為類別 1
+        else:
             return (Constants.BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO,
                     Constants.BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO)
 
@@ -4839,36 +4853,40 @@ class GameControlCenter:
             self.logger.warning("沒有有效的瀏覽器可執行操作")
             return
         
-        # 賽特二：選擇免費遊戲類別
-        self.logger.info("")
-        self.logger.info("請選擇免費遊戲類別:")
-        self.logger.info("       1 - 免費遊戲")
-        self.logger.info("       2 - 覺醒之力")
-        self.logger.info("       3 - 不朽覺醒")
-        self.logger.info("       q - 取消")
-        self.logger.info("")
+        # 判斷遊戲種類
+        is_sette_1 = Constants.IS_SETTE_1
         
+        # 賽特二需要選擇免費遊戲類別
         free_game_type: Optional[int] = None
-        try:
-            print("請輸入類別 > ", end="", flush=True)
-            sys.stdout.flush()
-            type_input = input().strip().lower()
+        if not is_sette_1:
+            self.logger.info("")
+            self.logger.info("請選擇免費遊戲類別:")
+            self.logger.info("       1 - 免費遊戲")
+            self.logger.info("       2 - 覺醒之力")
+            self.logger.info("       3 - 不朽覺醒")
+            self.logger.info("       q - 取消")
+            self.logger.info("")
             
-            if type_input == 'q':
+            try:
+                print("請輸入類別 > ", end="", flush=True)
+                sys.stdout.flush()
+                type_input = input().strip().lower()
+                
+                if type_input == 'q':
+                    self.logger.info("已取消操作")
+                    return
+                elif type_input in ('1', '2', '3'):
+                    free_game_type = int(type_input)
+                else:
+                    valid_types = ", ".join(str(t) for t in Constants.FREE_GAME_VALID_TYPES)
+                    self.logger.warning(f"無效的類別: {type_input}")
+                    self.logger.info(f"       請輸入 {valid_types}")
+                    return
+                    
+            except (EOFError, KeyboardInterrupt):
+                self.logger.info("")
                 self.logger.info("已取消操作")
                 return
-            elif type_input in ('1', '2', '3'):
-                free_game_type = int(type_input)
-            else:
-                valid_types = ", ".join(str(t) for t in Constants.FREE_GAME_VALID_TYPES)
-                self.logger.warning(f"無效的類別: {type_input}")
-                self.logger.info(f"       請輸入 {valid_types}")
-                return
-                
-        except (EOFError, KeyboardInterrupt):
-            self.logger.info("")
-            self.logger.info("已取消操作")
-            return
         
         # 顯示執行資訊
         self.logger.info("")
@@ -4878,9 +4896,12 @@ class GameControlCenter:
             browser_list = ", ".join([str(bt.index) for bt in target_browsers])
             self.logger.info(f"開始購買免費遊戲 (瀏覽器 {browser_list})")
         
-        type_name = self._get_free_game_type_name(free_game_type)
-        self.logger.info(f"       遊戲種類: 戰神賽特2覺醒之力")
-        self.logger.info(f"       購買類別: {type_name}")
+        if is_sette_1:
+            self.logger.info("       遊戲種類: 賽特一")
+        else:
+            type_name = self._get_free_game_type_name(free_game_type)
+            self.logger.info(f"       遊戲種類: 賽特二")
+            self.logger.info(f"       購買類別: {type_name}")
         
         # 使用統一的任務函數（DRY 原則）
         buy_free_game_task = self._create_buy_free_game_task(free_game_type)
@@ -5451,7 +5472,7 @@ class AutoSlotGameAppStarter:
         self.logger.info("")
     
     def _step_determine_browser_count(self) -> int:
-        """步驟 2: 啟動瀏覽器 - 提示使用者輸入數量
+        """步驟 2: 啟動瀏覽器
         
         回傳:
             瀏覽器數量
@@ -5460,32 +5481,13 @@ class AutoSlotGameAppStarter:
         self.logger.info("【步驟 2】啟動瀏覽器")
         self.logger.info(Constants.LOG_SEPARATOR)
         
-        max_browsers = len(self.credentials)
+        # 根據用戶數量決定瀏覽器數量，最多 MAX_BROWSER_COUNT 個
+        browser_count = min(len(self.credentials), Constants.MAX_BROWSER_COUNT)
         
-        if max_browsers == 0:
-            self.logger.error("沒有可用的使用者憑證")
-            return 0
+        self.logger.info(f"將開啟 {browser_count} 個瀏覽器")
+        self.logger.info("")
         
-        # 提示使用者輸入瀏覽器數量
-        while True:
-            try:
-                self.logger.info("")
-                print(f"\n請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ", end="", flush=True)
-                user_input = input().strip()
-                browser_count = int(user_input)
-                
-                if 1 <= browser_count <= max_browsers:
-                    self.logger.info(f"將開啟 {browser_count} 個瀏覽器")
-                    self.logger.info("")
-                    return browser_count
-                else:
-                    self.logger.warning(f"請輸入 1 到 {max_browsers} 之間的數字")
-                    
-            except ValueError:
-                self.logger.warning("請輸入有效的數字")
-            except (EOFError, KeyboardInterrupt):
-                self.logger.warning("使用者取消輸入")
-                raise KeyboardInterrupt()
+        return browser_count
     
     def _step_start_proxy_servers(self, browser_count: int) -> List[Optional[int]]:
         """步驟 3: 啟動代理中繼伺服器
@@ -5801,15 +5803,11 @@ class AutoSlotGameAppStarter:
         self.logger.info("")
     
     def perform_login(self) -> None:
-        """步驟 6: 執行登入操作（威樂平台）
-        
-        威樂平台登入流程：
-        1. 直接在登入頁面輸入帳號
-        2. 輸入密碼
-        3. 點擊登入按鈕
+        """步驟 6: 執行登入操作
         
         包含網路容錯機制：
         - 延長元素等待超時時間
+        - Loading 遮罩等待時間增加
         - 關鍵步驟失敗時自動重試
         """
         self.logger.info(Constants.LOG_SEPARATOR)
@@ -5827,72 +5825,53 @@ class AutoSlotGameAppStarter:
                         self.logger.info(f"瀏覽器 {context.index} 登入第 {attempt + 1} 次嘗試...")
                         time.sleep(Constants.RETRY_INTERVAL)
                     
-                    # 1. 輸入帳號（使用較長超時）
+                    # 1. 等待 loading 遮罩層消失（使用 JavaScript 檢測，避免多次 WebDriver 調用）
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        lambda d: d.execute_script("""
+                            const loading = document.querySelector('.loading-container');
+                            return !loading || loading.style.display === 'none' || 
+                                   getComputedStyle(loading).display === 'none' ||
+                                   getComputedStyle(loading).visibility === 'hidden';
+                        """)
+                    )
+
+                    # 2. 點擊初始登入按鈕
+                    initial_login_btn = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.element_to_be_clickable((By.XPATH, Constants.INITIAL_LOGIN_BUTTON))
+                    )
+                    driver.execute_script("arguments[0].click();", initial_login_btn)
+                    time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待彈窗動畫
+                    
+                    # 3. 等待登入表單顯示（使用較長超時）
+                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                        EC.visibility_of_element_located((By.CSS_SELECTOR, ".popup-wrap, .popup-account-container"))
+                    )
+                    
+                    # 4. 輸入帳號（使用較長超時）
                     username_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         EC.element_to_be_clickable((By.XPATH, Constants.USERNAME_INPUT))
                     )
-                    # 關閉自動完成和密碼提示
-                    driver.execute_script("arguments[0].setAttribute('autocomplete', 'off');", username_input)
                     username_input.clear()
                     time.sleep(Constants.SHORT_WAIT)
                     username_input.send_keys(credential.username)
                     
-                    # 2. 輸入密碼
+                    # 5. 輸入密碼
                     password_input = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         EC.element_to_be_clickable((By.XPATH, Constants.PASSWORD_INPUT))
                     )
-                    # 關閉密碼自動完成和提示
-                    driver.execute_script("arguments[0].setAttribute('autocomplete', 'new-password');", password_input)
                     password_input.clear()
-                    time.sleep(Constants.SHORT_WAIT)
+                    time.sleep(Constants.NORMAL_WAIT)
                     password_input.send_keys(credential.password)
                     
-                    # 3. 點擊登入按鈕
+                    # 6. 點擊登入按鈕
                     login_button = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
                         EC.element_to_be_clickable((By.XPATH, Constants.LOGIN_BUTTON))
                     )
                     driver.execute_script("arguments[0].click();", login_button)
                     time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待登入完成
                     
-                    # 4. 登入成功後跳轉到遊戲分類頁面
-                    driver.get(Constants.GAME_CATEGORY_URL)
-                    time.sleep(Constants.PAGE_LOAD_WAIT)  # 等待頁面載入
-                    
-                    # 5. 強制關閉所有可能的密碼外洩和保存提示
-                    for _ in range(3):  # 多次嘗試關閉
-                        try:
-                            driver.execute_script("""
-                                // 關閉所有密碼相關的對話框和提示
-                                (function() {
-                                    // 方法 1: 找到並點擊所有關閉按鈕
-                                    var closeButtons = document.querySelectorAll('button[aria-label*="Close"], button[aria-label*="關閉"], button[aria-label*="Dismiss"], button[class*="close"]');
-                                    closeButtons.forEach(btn => {
-                                        try { btn.click(); } catch(e) {}
-                                    });
-                                    
-                                    // 方法 2: 移除包含密碼相關文字的對話框
-                                    var dialogs = document.querySelectorAll('[role="dialog"], [role="alertdialog"], .modal, [class*="dialog"]');
-                                    dialogs.forEach(dialog => {
-                                        var text = dialog.textContent || '';
-                                        if (text.includes('密碼') || text.includes('password') || 
-                                            text.includes('外洩') || text.includes('leak') ||
-                                            text.includes('變更') || text.includes('change')) {
-                                            try { 
-                                                dialog.remove();
-                                                // 也嘗試移除背景遮罩
-                                                var backdrop = document.querySelector('[class*="backdrop"], [class*="overlay"]');
-                                                if (backdrop) backdrop.remove();
-                                            } catch(e) {}
-                                        }
-                                    });
-                                    
-                                    // 方法 3: 按 ESC 鍵
-                                    document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', keyCode: 27}));
-                                })();
-                            """)
-                            time.sleep(0.5)
-                        except Exception:
-                            pass
+                    # 7. 關閉所有彈窗
+                    BrowserHelper.close_popups(driver)
                     
                     return True
                     
@@ -5910,146 +5889,6 @@ class AutoSlotGameAppStarter:
         success_count = sum(1 for _, result, error in results if error is None and result)
         
         self.logger.info(f"{success_count}/{len(self.browser_threads)} 個瀏覽器已完成登入")
-        self.logger.info("")
-    
-    def click_game_buttons(self) -> None:
-        """步驟 7: 點擊遊戲供應商和開始遊戲按鈕
-        
-        簡化版遊戲導航，僅用於登入後進入遊戲頁面。
-        包含網路容錯機制和自動重試。
-        """
-        self.logger.info(Constants.LOG_SEPARATOR)
-        self.logger.info("【步驟 7】導航到遊戲")
-        self.logger.info(Constants.LOG_SEPARATOR)
-        
-        def click_buttons_task(context: BrowserContext) -> bool:
-            driver = context.driver
-            
-            # 最多重試 MAX_RETRY_ATTEMPTS 次
-            for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
-                try:
-                    if attempt > 0:
-                        self.logger.info(f"瀏覽器 {context.index} 進入遊戲第 {attempt + 1} 次嘗試...")
-                        # 重試前回到遊戲分類頁面
-                        driver.get(Constants.GAME_CATEGORY_URL)
-                        time.sleep(Constants.PAGE_LOAD_WAIT)
-                    
-                    # 記錄當前視窗控制代碼
-                    original_window = driver.current_window_handle
-                    original_windows = driver.window_handles
-                    
-                    # 1. 等待並點擊遊戲供應商按鈕 (ATG) - 會開啟新分頁
-                    self.logger.info(f"瀏覽器 {context.index} 正在尋找 ATG 供應商...")
-                    provider_button = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.element_to_be_clickable((By.XPATH, Constants.GAME_PROVIDER_BUTTON))
-                    )
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", provider_button)
-                    time.sleep(Constants.SHORT_WAIT)
-                    driver.execute_script("arguments[0].click();", provider_button)
-                    
-                    # 2. 等待新分頁開啟並切換過去
-                    self.logger.info(f"瀏覽器 {context.index} 等待新分頁開啟...")
-                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        lambda d: len(d.window_handles) > len(original_windows)
-                    )
-                    
-                    # 找到新開啟的分頁
-                    new_windows = [w for w in driver.window_handles if w not in original_windows]
-                    if new_windows:
-                        driver.switch_to.window(new_windows[0])
-                        self.logger.info(f"瀏覽器 {context.index} 已切換到新分頁: {driver.current_url}")
-                        
-                        # 等待頁面完全載入
-                        WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                            lambda d: d.execute_script("return document.readyState") == "complete"
-                        )
-                        time.sleep(Constants.PAGE_LOAD_WAIT_LONG)  # 額外等待動態內容載入
-                    
-                    # 3. 等待並點擊開始遊戲按鈕 (戰神賽特2覺醒之力)
-                    self.logger.info(f"瀏覽器 {context.index} 正在尋找戰神賽特2...")
-                    
-                    # 嘗試多種選擇器策略
-                    start_game_button = None
-                    selectors_to_try = [
-                        Constants.START_GAME_BUTTON,  # 原始選擇器
-                        "//img[@alt='戰神賽特2覺醒之力']",  # 只找圖片
-                        "//div[contains(@class, 'card')]//img[@alt='戰神賽特2覺醒之力']/following::button[1]",  # 圖片後的按鈕
-                        "//button[contains(., '開始遊戲') or contains(., '試玩') or contains(@class, 'btn')]"  # 任何開始按鈕
-                    ]
-                    
-                    for idx, selector in enumerate(selectors_to_try):
-                        try:
-                            self.logger.info(f"瀏覽器 {context.index} 嘗試選擇器 {idx + 1}/{len(selectors_to_try)}")
-                            start_game_button = WebDriverWait(driver, 10).until(
-                                EC.presence_of_element_located((By.XPATH, selector))
-                            )
-                            if start_game_button:
-                                self.logger.info(f"瀏覽器 {context.index} 找到遊戲元素 (選擇器 {idx + 1})")
-                                break
-                        except Exception as e:
-                            if idx < len(selectors_to_try) - 1:
-                                continue
-                            else:
-                                # 最後一次嘗試失敗，輸出頁面資訊幫助調試
-                                self.logger.warning(f"瀏覽器 {context.index} 所有選擇器都失敗")
-                                self.logger.warning(f"當前 URL: {driver.current_url}")
-                                try:
-                                    # 檢查頁面上是否有遊戲卡片
-                                    cards_count = driver.execute_script("return document.querySelectorAll('[class*=\"card\"]').length;")
-                                    self.logger.warning(f"頁面上的卡片數量: {cards_count}")
-                                except Exception:
-                                    pass
-                                raise
-                    
-                    if not start_game_button:
-                        raise Exception("找不到戰神賽特2遊戲按鈕")
-                    
-                    # 滾動到元素並點擊
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", start_game_button)
-                    time.sleep(Constants.SHORT_WAIT)
-                    
-                    # 嘗試點擊按鈕（如果元素是圖片，則找父層的按鈕）
-                    try:
-                        if start_game_button.tag_name == 'img':
-                            # 找到圖片所在的卡片中的按鈕
-                            card = driver.execute_script("return arguments[0].closest('[class*=\"card\"]');", start_game_button)
-                            actual_button = card.find_element(By.XPATH, ".//button")
-                            driver.execute_script("arguments[0].click();", actual_button)
-                        else:
-                            driver.execute_script("arguments[0].click();", start_game_button)
-                    except Exception:
-                        # 備用方案：直接點擊找到的元素
-                        driver.execute_script("arguments[0].click();", start_game_button)
-                    
-                    time.sleep(Constants.PAGE_LOAD_WAIT_LONG)  # 等待遊戲載入
-                    
-                    # 4. 關閉原始分頁（可選）
-                    try:
-                        if len(driver.window_handles) > 1 and original_window in driver.window_handles:
-                            driver.switch_to.window(original_window)
-                            driver.close()
-                            driver.switch_to.window(new_windows[0])
-                            self.logger.info(f"瀏覽器 {context.index} 已關閉原始分頁")
-                    except Exception:
-                        pass  # 關閉舊分頁失敗也沒關係
-                    
-                    self.logger.info(f"瀏覽器 {context.index} 已進入遊戲頁面")
-                    return True
-                    
-                except Exception as e:
-                    if attempt < Constants.MAX_RETRY_ATTEMPTS - 1 and is_network_error(e):
-                        self.logger.warning(f"瀏覽器 {context.index} 導航遊戲超時，準備重試...")
-                        continue
-                    else:
-                        self.logger.warning(f"瀏覽器 {context.index} 導航遊戲失敗: {e}")
-                        return False
-            
-            return False
-        
-        results = self.execute_on_all_browsers(click_buttons_task, timeout=Constants.GAME_NAVIGATION_TIMEOUT)
-        success_count = sum(1 for _, result, error in results if error is None and result)
-        
-        self.logger.info(f"{success_count}/{len(self.browser_threads)} 個瀏覽器已進入遊戲")
         self.logger.info("")
     
     def navigate_to_game(self) -> None:
@@ -6511,7 +6350,7 @@ class AutoSlotGameAppStarter:
 # =============================================================================
 
 def main() -> None:
-    """主程式入口點 - 完整自動化流程。
+    """主程式入口點。
     
     執行應用程式的完整流程：
     1. 初始化（載入配置、啟動代理、建立瀏覽器）
@@ -6519,8 +6358,10 @@ def main() -> None:
     3. 執行登入操作
     4. 導航到遊戲頁面
     5. 調整視窗排列
-    6. 圖片檢測流程
-    7. 啟動控制面板（互動式命令操作）
+    6. 執行圖片檢測流程
+    7. 啟動遊戲控制面板
+    
+    程式結束時自動清理所有資源。
     """
     # 建立日誌記錄器
     logger = LoggerFactory.get_logger()
@@ -6545,7 +6386,7 @@ def main() -> None:
             logger.info(Constants.LOG_SEPARATOR)
             logger.info("【初始化完成】")
             logger.info(Constants.LOG_SEPARATOR)
-            logger.info(f"瀏覽器: {len(browser_threads)} | 用戶: {len(starter.get_credentials())}")
+            logger.info(f"瀏覽器: {len(browser_threads)} | 用戶: {len(starter.get_credentials())} | 規則: {len(starter.get_rules())}")
             logger.info("")
             
             # 步驟 5: 導航到登入頁面
@@ -6554,8 +6395,8 @@ def main() -> None:
             # 步驟 6: 執行登入操作
             starter.perform_login()
             
-            # 步驟 7: 點擊遊戲供應商和開始遊戲按鈕
-            starter.click_game_buttons()
+            # 步驟 7: 導航到遊戲頁面
+            starter.navigate_to_game()
             
             # 步驟 8: 調整視窗排列
             starter.arrange_windows()
@@ -6563,7 +6404,13 @@ def main() -> None:
             # 步驟 9: 執行圖片檢測流程
             starter.execute_image_detection_flow()
             
-            # 步驟 10: 啟動遊戲控制面板
+            logger.info(Constants.LOG_SEPARATOR)
+            logger.info("【啟動完成】")
+            logger.info(Constants.LOG_SEPARATOR)
+            logger.info("所有瀏覽器已就緒")
+            logger.info("")
+            
+            # 步驟 10: 啟動遊戲控制面板（阻塞式，直到使用者退出）
             starter.start_control_center()
             
         else:
@@ -6571,7 +6418,7 @@ def main() -> None:
             
     except KeyboardInterrupt:
         logger.info("")
-        logger.info("正在清理資源...")
+        logger.info("收到中斷信號，正在清理...")
     except Exception as e:
         logger.error(f"程式執行時發生錯誤: {e}")
     finally:
