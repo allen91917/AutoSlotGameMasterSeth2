@@ -110,8 +110,8 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "2.1.0"
-    SYSTEM_NAME: str = "戰神賽特二自動化系統"
+    VERSION: str = "1.0.0"
+    SYSTEM_NAME: str = "威樂戰神賽特二自動化系統"
     
     # =========================================================================
     # 日誌格式配置
@@ -265,12 +265,6 @@ class Constants:
     # =========================================================================
     # 購買免費遊戲按鈕座標比例
     # =========================================================================
-    # 賽特一專用：只有一個免費遊戲按鈕
-    BUY_FREE_GAME_BUTTON_X_RATIO: float = 0.15    # 免費遊戲區域按鈕 X 座標比例
-    BUY_FREE_GAME_BUTTON_Y_RATIO: float = 0.75    # 免費遊戲區域按鈕 Y 座標比例
-    BUY_FREE_GAME_CONFIRM_X_RATIO: float = 0.65   # 免費遊戲確認按鈕 X 座標比例（賽特一）
-    BUY_FREE_GAME_CONFIRM_Y_RATIO: float = 0.9    # 免費遊戲確認按鈕 Y 座標比例（賽特一）
-    
     # 賽特二專用：免費遊戲類別座標 - only_freegame (類別 1)
     BUY_FREE_GAME_ONLY_FREEGAME_X_RATIO: float = 0.3    # 免費遊戲確認按鈕 X 座標比例
     BUY_FREE_GAME_ONLY_FREEGAME_Y_RATIO: float = 0.85   # 免費遊戲確認按鈕 Y 座標比例
@@ -309,9 +303,9 @@ class Constants:
     # 金額模板配置
     # -------------------------------------------------------------------------
     BETSIZE_DISPLAY_X: float = 0.72
-    BETSIZE_DISPLAY_Y: float = 0.85
+    BETSIZE_DISPLAY_Y: float = 0.88
     BETSIZE_CROP_MARGIN_X: int = 40
-    BETSIZE_CROP_MARGIN_Y: int = 10
+    BETSIZE_CROP_MARGIN_Y: int = 12
     
     # =========================================================================
     # 黑屏檢測模板配置
@@ -1367,6 +1361,11 @@ class ConfigReader:
         
         for line_number, line in enumerate(lines, start=2):
             try:
+                # 限制最多讀取 3 個帳號
+                if len(credentials) >= 3:
+                    self.logger.info("已達到最大帳號數量限制 (3個)，忽略其餘帳號")
+                    break
+                
                 parts = [p.strip() for p in line.split(',')]
                 
                 if len(parts) < 2:
@@ -1434,6 +1433,35 @@ class ConfigReader:
                 if len(parts) < 2:
                     self.logger.warning(f"第 {line_number} 行格式不完整: {line}")
                     continue
+                
+                # 檢查是否為舊格式（沒有規則類型前綴，第一個欄位是數字）
+                # 舊格式: 金額:時間(分鐘):最小(秒數):最大(秒數)
+                first_part = parts[0].strip()
+                try:
+                    # 嘗試將第一個欄位轉換為數字，如果成功表示是舊格式
+                    float(first_part)
+                    # 舊格式，轉換為新格式的定時旋轉規則
+                    if len(parts) >= 4:
+                        amount = float(parts[0].strip())
+                        duration = int(parts[1].strip())
+                        min_seconds = float(parts[2].strip())
+                        max_seconds = float(parts[3].strip())
+                        
+                        rules.append(BetRule(
+                            rule_type='s',
+                            amount=amount,
+                            duration=duration,
+                            min_seconds=min_seconds,
+                            max_seconds=max_seconds,
+                            once_only=once_only
+                        ))
+                        continue
+                    else:
+                        self.logger.warning(f"第 {line_number} 行格式不完整: {line}")
+                        continue
+                except ValueError:
+                    # 不是數字，表示是新格式，繼續正常解析
+                    pass
                 
                 rule_type = parts[0].strip().lower()
                 
