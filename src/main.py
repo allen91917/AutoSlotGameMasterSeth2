@@ -379,12 +379,11 @@ class Constants:
     # 遊戲金額配置（tuple 支援 in 檢查和索引計算）
     # -------------------------------------------------------------------------
     GAME_BETSIZE: Tuple[int, ...] = (
-        2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40,
-        48, 56, 60, 64, 72, 80, 96, 100, 120, 140, 160, 180, 200,
-        240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600,
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 16, 18, 20, 24, 28, 30, 32, 36, 40,
+        42, 48, 54, 56, 60, 64, 72, 80, 96, 100, 112, 120, 128, 140, 144,
+        160, 180, 200,240, 280, 300, 320, 360, 400, 420, 480, 500, 540, 560, 600,
         640, 700, 720, 800, 840, 900, 960, 980, 1000, 1080, 1120,
-        1200, 1260, 1280, 1400, 1440, 1500, 1600, 1800, 2000, 2100,
-        2400, 2700, 3000
+        1200, 1260, 1280, 1400, 1440, 1600, 1800, 2000
     )
 
 
@@ -1252,6 +1251,49 @@ def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLO
     except Exception:
         # 返回 None 保持與 cv2.imread() 相同的行為
         return None
+
+
+def cv2_imwrite_unicode(file_path: Union[str, Path], img: np.ndarray) -> bool:
+    """安全寫入圖片（支援 Unicode 路徑）。
+
+    OpenCV 的 cv2.imwrite() 無法處理包含中文或其他非 ASCII 字元的路徑。
+    此函式使用 PIL 作為替代方案。
+
+    參數:
+        file_path: 圖片檔案路徑（支援中文路徑）。
+        img: 圖片的 numpy 陣列（BGR 格式）。
+
+    回傳:
+        是否寫入成功。
+
+    範例:
+        >>> img = cv2.imread("input.png")
+        >>> cv2_imwrite_unicode("輸出/結果.png", img)
+        True
+    """
+    try:
+        # 轉換為 Path 物件
+        path = Path(file_path)
+        
+        # 確保目錄存在
+        path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # OpenCV 使用 BGR，PIL 使用 RGB，需要轉換
+        if len(img.shape) == 3 and img.shape[2] == 3:
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        else:
+            img_rgb = img
+        
+        # 轉換為 PIL Image
+        pil_image = Image.fromarray(img_rgb)
+        
+        # 使用 PIL 保存（PIL 支援 Unicode 路徑）
+        pil_image.save(path)
+        
+        return True
+        
+    except Exception:
+        return False
 
 
 # =============================================================================
@@ -2532,7 +2574,28 @@ class ImageDetector:
                 
                 # 截取整個瀏覽器截圖
                 screenshot = driver.get_screenshot_as_png()
-                screenshot_np = np.array(Image.open(io.BytesIO(screenshot)))
+                screenshot_img = Image.open(io.BytesIO(screenshot))
+                
+                # 獲取實際截圖尺寸
+                image_width, image_height = screenshot_img.size
+                
+                # 使用與擷取模板相同的座標和邊距裁切金額區域
+                center_x = int(image_width * Constants.BETSIZE_DISPLAY_X)
+                center_y = int(image_height * Constants.BETSIZE_DISPLAY_Y)
+                margin_x = Constants.BETSIZE_CROP_MARGIN_X
+                margin_y = Constants.BETSIZE_CROP_MARGIN_Y
+                
+                # 計算裁切範圍
+                crop_left = max(0, center_x - margin_x)
+                crop_top = max(0, center_y - margin_y)
+                crop_right = min(image_width, center_x + margin_x)
+                crop_bottom = min(image_height, center_y + margin_y)
+                
+                # 裁切金額區域
+                cropped_img = screenshot_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+                
+                # 轉換為灰階 numpy 陣列
+                screenshot_np = np.array(cropped_img)
                 screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
                 
                 # 與資料夾中的圖片進行比對
@@ -2543,8 +2606,6 @@ class ImageDetector:
                         amount_value = float(matched_amount)
                         # 使用 Constants.GAME_BETSIZE 進行驗證
                         if amount_value in Constants.GAME_BETSIZE:
-                            if not silent:
-                                self.logger.info(f"目前金額: {amount_value}")
                             return amount_value
                     except ValueError:
                         pass
@@ -2622,15 +2683,42 @@ class ImageDetector:
             self.logger.error(f"比對圖片時發生錯誤: {e}")
             return None, 0.0
 
-    def click_betsize_button(self, driver: WebDriver, x_ratio: float, y_ratio: float) -> None:
-        """點擊下注金額調整按鈕。"""
-        # 取得畫面尺寸
-        screenshot = driver.get_screenshot_as_png()
-        w, h = Image.open(io.BytesIO(screenshot)).size
-        x, y = int(w * x_ratio), int(h * y_ratio)
+    def click_betsize_button(
+        self, 
+        driver: WebDriver, 
+        x_ratio: float, 
+        y_ratio: float
+    ) -> bool:
+        """點擊下注金額調整按鈕（使用 Canvas 座標系統）。
         
-        # 使用標準 CDP 點擊
-        BrowserHelper.execute_cdp_click(driver, x, y)
+        參數:
+            driver: WebDriver 實例
+            x_ratio: X 座標比例（相對於 Canvas）
+            y_ratio: Y 座標比例（相對於 Canvas）
+            
+        回傳:
+            是否點擊成功
+        """
+        # 先取得 Canvas 區域
+        rect = BrowserHelper.get_canvas_rect(driver)
+        if not rect:
+            return False
+        
+        # 計算實際點擊座標（基於 Canvas）
+        click_x = rect["x"] + rect["w"] * x_ratio
+        click_y = rect["y"] + rect["h"] * y_ratio
+        
+        # 使用和其他按鈕一樣的點擊方法
+        for ev in ["mousePressed", "mouseReleased"]:
+            driver.execute_cdp_cmd("Input.dispatchMouseEvent", {
+                "type": ev,
+                "x": click_x,
+                "y": click_y,
+                "button": "left",
+                "clickCount": 1
+            })
+        
+        return True
 
     def adjust_betsize(
         self,
@@ -2645,6 +2733,10 @@ class ImageDetector:
         decrease_btn = (Constants.BETSIZE_DECREASE_BUTTON_X, Constants.BETSIZE_DECREASE_BUTTON_Y)
         
         attempt = 0
+        last_amount = None
+        stuck_count = 0  # 連續卡住計數
+        max_stuck_attempts = 10  # 最多允許連續 10 次金額不變
+        
         while True:
             # 檢查停止事件
             if stop_event and stop_event.is_set():
@@ -2652,7 +2744,8 @@ class ImageDetector:
                 return False
             
             attempt += 1
-            current = self.get_current_betsize(driver, silent=True)
+            # 第一次嘗試時不使用 silent 模式，以便顯示調試訊息
+            current = self.get_current_betsize(driver, silent=(attempt > 1))
             
             # 無法識別金額，繼續等待
             if current is None:
@@ -2661,14 +2754,49 @@ class ImageDetector:
                 time.sleep(Constants.BETSIZE_ADJUST_RETRY_WAIT)
                 continue
             
+            # 檢測是否卡住（金額連續多次不變）
+            if last_amount is not None and current == last_amount and current != target_amount:
+                stuck_count += 1
+                if stuck_count >= max_stuck_attempts:
+                    self.logger.error(
+                        f"金額調整失敗：已連續 {stuck_count} 次點擊但金額仍是 {current}，"
+                        f"目標是 {target_amount}"
+                    )
+                    self.logger.error("可能的原因：")
+                    self.logger.error("  1. 按鈕位置配置不正確（相對於 Canvas 的比例）")
+                    self.logger.error("  2. 遊戲畫面被遮擋或未正常載入")
+                    self.logger.error("  3. 按鈕處於禁用狀態")
+                    self.logger.error("  4. Canvas 區域偵測錯誤")
+                    return False
+            else:
+                stuck_count = 0
+            
+            last_amount = current
+            
             # 已達目標
             if current == target_amount:
+                if attempt == 1:
+                    self.logger.info(f"金額已經是目標值 {target_amount}，無需調整")
+                else:
+                    self.logger.info(f"金額調整成功：{current}")
                 return True
             
             # 點擊調整按鈕
             current_index = Constants.GAME_BETSIZE.index(current)
+            direction = "增加" if target_index > current_index else "減少"
             btn = increase_btn if target_index > current_index else decrease_btn
-            self.click_betsize_button(driver, btn[0], btn[1])
+            
+            # 顯示調整進度
+            if attempt == 1:
+                self.logger.info(f"當前: {current} → 目標: {target_amount} (需要{direction})")
+            
+            # 點擊按鈕
+            success = self.click_betsize_button(driver, btn[0], btn[1])
+            if not success:
+                if attempt == 1:
+                    self.logger.error("無法取得 Canvas 區域，金額調整失敗")
+                return False
+            
             time.sleep(Constants.BETSIZE_ADJUST_STEP_WAIT)
 
 
