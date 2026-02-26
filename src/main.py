@@ -23,7 +23,7 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 1.0.1
+    版本: 1.0.2
     作者: 凡臻科技
     授權: MIT License
 
@@ -110,7 +110,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "1.0.1"
+    VERSION: str = "1.0.2"
     SYSTEM_NAME: str = "威樂戰神賽特二自動化系統"
     
     # =========================================================================
@@ -6742,19 +6742,19 @@ class AutoSlotGameAppStarter:
                     self._prompt_capture_template(image_detector, template_name, display_name)
                     return
                 
-                # 擷取並儲存模板（只截取 Canvas 區域）
+                # 擷取並儲存模板（截取整個瀏覽器畫面）
                 template_path = image_detector.get_template_path(template_name)
-                result = image_detector.capture_canvas_screenshot(
+                result = image_detector.capture_screenshot(
                     selected_thread.context.driver, 
                     template_path
                 )
                 
                 if result is not None:
                     self.logger.info("")
-                    self.logger.info(f"模板圖片已建立（Canvas 區域）: {template_path}")
+                    self.logger.info(f"模板圖片已建立: {template_path}")
                     self.logger.info("")
                 else:
-                    self.logger.error("模板截取失敗，無法取得 Canvas 區域")
+                    self.logger.error("模板截取失敗")
                 
             except ValueError:
                 self.logger.warning(f"無效的輸入: {user_input}")
