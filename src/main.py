@@ -3065,6 +3065,11 @@ class GameControlCenter:
         self._rule_execution_max_hours: Optional[float] = None
         self._time_monitor_thread: Optional[threading.Thread] = None
         
+        # 自動跳過點擊（獨立執行緒）
+        self._auto_skip_running: bool = False
+        self._auto_skip_thread: Optional[threading.Thread] = None
+        self._auto_skip_stop_event = threading.Event()
+        
         # 自動啟動控制
         self._auto_start_timer: Optional[threading.Timer] = None
         self._user_has_input: bool = False
@@ -3147,20 +3152,16 @@ class GameControlCenter:
     # -------------------------------------------------------------------------
 
     def _error_monitor_loop(self) -> None:
-        """錯誤訊息、黑屏監控與自動跳過點擊循環。
+        """錯誤訊息與黑屏監控循環。
         
         在背景持續運行，每隔固定時間同步檢測所有瀏覽器：
         - 黑屏（BLACK_SCREEN）: 連續檢測到 BLACKSCREEN_CONSECUTIVE_THRESHOLD 次 → 導航到 LOGIN_PAGE
         - 錯誤訊息（ERROR_REMIND）: 檢測到 1 次 → 點擊 ERROR_CONFIRM 按鈕
-        - 自動跳過點擊：每隔 AUTO_SKIP_CLICK_INTERVAL 秒，對所有瀏覽器執行跳過點擊
         
         檢測流程同步並行，恢復操作在獨立執行緒中非同步執行（不阻塞監控）。
+        注意：自動跳過點擊已移至獨立執行緒 _auto_skip_click_loop，不受此循環影響。
         """
-        self.logger.info("錯誤訊息、黑屏監控與自動跳過點擊已啟動")
-        
-        # 自動跳過點擊計時器
-        last_skip_click_time = time.time()
-        skip_click_count = 0
+        self.logger.info("錯誤訊息與黑屏監控已啟動")
         
         # 黑屏連續檢測計數器（每個瀏覽器獨立計數）
         blackscreen_counts: Dict[int, int] = {}
@@ -3204,34 +3205,31 @@ class GameControlCenter:
                 error_detected: Dict[int, bool] = {}
                 
                 def detect_for_browser(bt: 'BrowserThread') -> Tuple[int, bool, bool]:
-                    """同時檢測單個瀏覽器的黑屏和錯誤訊息。
+                    """同時檢測單個瀏覽器的黑屏和錯誤訊息（直接操作 driver）。
                     
                     回傳: (browser_index, 是否黑屏, 是否錯誤訊息)
                     """
                     if not bt.is_browser_alive() or not bt.context:
                         return (bt.index, False, False)
                     try:
-                        def task(context: BrowserContext) -> Tuple[bool, bool]:
-                            is_blackscreen = False
-                            is_error = False
-                            
-                            # 檢測黑屏
-                            if blackscreen_template_exists:
-                                result = self._image_detector.detect_in_browser(
-                                    context.driver, Constants.BLACK_SCREEN
-                                )
-                                is_blackscreen = result is not None
-                            
-                            # 檢測錯誤訊息
-                            if error_template_exists:
-                                result = self._image_detector.detect_in_browser(
-                                    context.driver, Constants.ERROR_REMIND
-                                )
-                                is_error = result is not None
-                            
-                            return (is_blackscreen, is_error)
+                        driver = bt.context.driver
+                        is_blackscreen = False
+                        is_error = False
                         
-                        is_blackscreen, is_error = bt.execute_task(task)
+                        # 檢測黑屏
+                        if blackscreen_template_exists:
+                            result = self._image_detector.detect_in_browser(
+                                driver, Constants.BLACK_SCREEN
+                            )
+                            is_blackscreen = result is not None
+                        
+                        # 檢測錯誤訊息
+                        if error_template_exists:
+                            result = self._image_detector.detect_in_browser(
+                                driver, Constants.ERROR_REMIND
+                            )
+                            is_error = result is not None
+                        
                         return (bt.index, is_blackscreen, is_error)
                     except Exception:
                         return (bt.index, False, False)
@@ -3284,50 +3282,6 @@ class GameControlCenter:
                         # 非同步啟動點擊執行緒
                         self._start_recovery_thread(bt, "error")
                 
-                # ===== 自動跳過點擊（每隔 AUTO_CLICK_INTERVAL 秒執行一次）=====
-                current_time = time.time()
-                if current_time - last_skip_click_time >= Constants.AUTO_CLICK_INTERVAL:
-                    last_skip_click_time = current_time
-                    skip_click_count += 1
-                    
-                    # 對所有活躍瀏覽器執行點擊關閉按鈕（排除正在恢復中的）
-                    for bt in active_browsers:
-                        if self._error_monitor_stop_event.is_set():
-                            break
-                        try:
-                            if not bt.is_browser_alive() or not bt.context:
-                                continue
-                            
-                            def skip_click_task(context: BrowserContext) -> bool:
-                                """執行點擊關閉按鈕。"""
-                                driver = context.driver
-                                rect = BrowserHelper.get_canvas_rect(driver)
-                                if not rect:
-                                    return False
-                                
-                                # 點擊跳過按鈕座標
-                                BrowserHelper.click_canvas_position(
-                                    driver, rect,
-                                    Constants.AUTO_SKIP_CLICK_X_RATIO,
-                                    Constants.AUTO_SKIP_CLICK_Y_RATIO
-                                )
-                                # 點擊自動關閉座標
-                                BrowserHelper.click_canvas_position(
-                                    driver, rect,
-                                    Constants.AUTO_CLOSE_CLICK_X_RATIO,
-                                    Constants.AUTO_CLOSE_CLICK_Y_RATIO
-                                )
-                                return True
-                            
-                            bt.execute_task(skip_click_task, timeout=5)
-                        except Exception:
-                            # 靜默處理錯誤，避免日誌過多
-                            pass
-                    
-                    # 每 10 次顯示一次統計
-                    if skip_click_count % 10 == 0:
-                        self.logger.debug(f"自動跳過已執行 {skip_click_count} 次")
-                
                 # 等待下一次檢測
                 self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
                 
@@ -3335,7 +3289,7 @@ class GameControlCenter:
                 self.logger.error(f"監控循環發生錯誤: {e}")
                 self._error_monitor_stop_event.wait(timeout=Constants.ERROR_MONITOR_INTERVAL)
         
-        self.logger.info(f"錯誤訊息、黑屏監控與自動跳過點擊已停止（共執行 {skip_click_count} 次跳過點擊）")
+        self.logger.info("錯誤訊息與黑屏監控已停止")
     
     def _start_recovery_thread(self, bt: 'BrowserThread', recovery_type: str) -> None:
         """啟動非同步恢復執行緒。
@@ -3395,23 +3349,22 @@ class GameControlCenter:
                     self.logger.debug(f"瀏覽器 {browser_index} 恢復流程重試第 {attempt + 1} 次...")
                     time.sleep(Constants.RETRY_INTERVAL)
                 
-                def click_error_confirm_task(context: BrowserContext) -> bool:
-                    """點擊錯誤訊息確認按鈕。"""
-                    driver = context.driver
-                    
-                    # 切換到 iframe（Canvas 在 iframe 內），使用較長超時
-                    driver.switch_to.default_content()
-                    iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
-                    )
-                    driver.switch_to.frame(iframe)
-                    time.sleep(Constants.NORMAL_WAIT)
-                    
-                    # 取得 Canvas 區域
-                    rect = BrowserHelper.get_canvas_rect(driver)
-                    if not rect:
-                        return False
-                    
+                # 直接操作 driver 點擊錯誤訊息確認按鈕
+                driver = bt.context.driver
+                
+                # 切換到 iframe（Canvas 在 iframe 內），使用較長超時
+                driver.switch_to.default_content()
+                iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                )
+                driver.switch_to.frame(iframe)
+                time.sleep(Constants.NORMAL_WAIT)
+                
+                # 取得 Canvas 區域
+                rect = BrowserHelper.get_canvas_rect(driver)
+                result = rect is not None
+                
+                if result:
                     time.sleep(Constants.SHORT_WAIT)
                     
                     # 計算座標並點擊確認按鈕
@@ -3420,9 +3373,6 @@ class GameControlCenter:
                         Constants.ERROR_CONFIRM_BUTTON_X_RATIO,
                         Constants.ERROR_CONFIRM_BUTTON_Y_RATIO
                     )
-                    return True
-                
-                result = bt.execute_task(click_error_confirm_task)
                 
                 if result:
                     self.logger.info(
@@ -3467,30 +3417,27 @@ class GameControlCenter:
             Canvas 存在返回 True，否則返回 False
         """
         try:
-            def task(context: BrowserContext) -> bool:
-                driver = context.driver
-                
-                # 先嘗試切換到 iframe
-                try:
-                    driver.switch_to.default_content()
-                    iframe = WebDriverWait(driver, Constants.SHORT_WAIT).until(
-                        EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
-                    )
-                    driver.switch_to.frame(iframe)
-                except Exception:
-                    # iframe 不存在，表示已回到大廳
-                    return False
-                
-                # 檢查 Canvas 是否存在
-                try:
-                    canvas_exists = driver.execute_script(
-                        f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;"
-                    )
-                    return canvas_exists
-                except Exception:
-                    return False
+            driver = bt.context.driver
             
-            return bt.execute_task(task, timeout=5)
+            # 先嘗試切換到 iframe
+            try:
+                driver.switch_to.default_content()
+                iframe = WebDriverWait(driver, Constants.SHORT_WAIT).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                )
+                driver.switch_to.frame(iframe)
+            except Exception:
+                # iframe 不存在，表示已回到大廳
+                return False
+            
+            # 檢查 Canvas 是否存在
+            try:
+                canvas_exists = driver.execute_script(
+                    f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;"
+                )
+                return canvas_exists
+            except Exception:
+                return False
         except Exception:
             return False
     
@@ -3570,24 +3517,20 @@ class GameControlCenter:
             self.logger.error(f"瀏覽器 {browser_index} ({username}) 黑屏恢復發生異常: {e}")
     
     def _recovery_navigate_to_login(self, bt: 'BrowserThread') -> bool:
-        """恢復流程：導航到登入頁面。"""
+        """恢復流程：導航到登入頁面（直接操作 driver）。"""
         for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
             try:
                 if attempt > 0:
                     time.sleep(Constants.RETRY_INTERVAL)
                 
-                def task(context: BrowserContext) -> bool:
-                    driver = context.driver
-                    driver.switch_to.default_content()
-                    driver.get(Constants.LOGIN_PAGE)
-                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
-                        lambda d: d.execute_script("return document.readyState") == "complete"
-                    )
-                    time.sleep(Constants.PAGE_LOAD_WAIT)
-                    return True
-                
-                if bt.execute_task(task):
-                    return True
+                driver = bt.context.driver
+                driver.switch_to.default_content()
+                driver.get(Constants.LOGIN_PAGE)
+                WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                    lambda d: d.execute_script("return document.readyState") == "complete"
+                )
+                time.sleep(Constants.PAGE_LOAD_WAIT)
+                return True
                     
             except Exception as e:
                 if attempt == Constants.MAX_RETRY_ATTEMPTS - 1:
@@ -3595,49 +3538,45 @@ class GameControlCenter:
         return False    
 
     def _recovery_navigate_to_game(self, bt: 'BrowserThread') -> bool:
-        """恢復流程：搜尋遊戲並進入（參考 navigate_to_game）。"""
+        """恢復流程：搜尋遊戲並進入（直接操作 driver）。"""
         for attempt in range(Constants.MAX_RETRY_ATTEMPTS):
             try:
                 if attempt > 0:
                     time.sleep(Constants.RETRY_INTERVAL)
                 
-                def task(context: BrowserContext) -> bool:
-                    driver = context.driver
-                    
-                    # 1. 關閉可能出現的公告彈窗
-                    try:
-                        BrowserHelper.close_popups(driver)
-                        time.sleep(Constants.NORMAL_WAIT)
-                    except Exception:
-                        pass
-                    
-                    # 2. 用背景圖片找遊戲卡片並點擊
-                    game_pattern = Constants.get_game_pattern()
-                    game_selector = f"//div[contains(@class, 'game-img') and contains(@style, '{game_pattern}')]"
-                    game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        EC.presence_of_element_located((By.XPATH, game_selector))
-                    )
-                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", game_element)
-                    time.sleep(Constants.NORMAL_WAIT)
-                    driver.execute_script("arguments[0].click();", game_element)
-                    time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
-                    
-                    # 3. 切換到 iframe
-                    time.sleep(Constants.PAGE_LOAD_WAIT)
-                    iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
-                        EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
-                    )
-                    driver.switch_to.frame(iframe)
-                    
-                    # 4. 驗證 Canvas 存在
-                    WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
-                        lambda d: d.execute_script(f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;")
-                    )
-                    
-                    return True
+                driver = bt.context.driver
                 
-                if bt.execute_task(task):
-                    return True
+                # 1. 關閉可能出現的公告彈窗
+                try:
+                    BrowserHelper.close_popups(driver)
+                    time.sleep(Constants.NORMAL_WAIT)
+                except Exception:
+                    pass
+                
+                # 2. 用背景圖片找遊戲卡片並點擊
+                game_pattern = Constants.get_game_pattern()
+                game_selector = f"//div[contains(@class, 'game-img') and contains(@style, '{game_pattern}')]"
+                game_element = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                    EC.presence_of_element_located((By.XPATH, game_selector))
+                )
+                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", game_element)
+                time.sleep(Constants.NORMAL_WAIT)
+                driver.execute_script("arguments[0].click();", game_element)
+                time.sleep(Constants.PAGE_LOAD_WAIT_LONG)
+                
+                # 3. 切換到 iframe
+                time.sleep(Constants.PAGE_LOAD_WAIT)
+                iframe = WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT_LONG).until(
+                    EC.presence_of_element_located((By.XPATH, Constants.GAME_IFRAME))
+                )
+                driver.switch_to.frame(iframe)
+                
+                # 4. 驗證 Canvas 存在
+                WebDriverWait(driver, Constants.ELEMENT_WAIT_TIMEOUT).until(
+                    lambda d: d.execute_script(f"return document.getElementById('{Constants.GAME_CANVAS}') !== null;")
+                )
+                
+                return True
                     
             except Exception as e:
                 if attempt == Constants.MAX_RETRY_ATTEMPTS - 1:
@@ -3908,6 +3847,102 @@ class GameControlCenter:
             self.logger.debug(f"點擊錯誤確認按鈕失敗: {e}")
             return False
     
+    # -------------------------------------------------------------------------
+    # 自動跳過點擊功能（獨立執行緒）
+    # -------------------------------------------------------------------------
+    
+    def _auto_skip_click_loop(self) -> None:
+        """自動跳過點擊循環（獨立執行緒）。
+        
+        持續運行直到收到停止信號。
+        每隔 AUTO_CLICK_INTERVAL 秒，直接對所有瀏覽器執行跳過/關閉點擊。
+        不經過 BrowserThread 任務佇列，不受監控循環或恢復操作影響。
+        """
+        self.logger.info(f"自動跳過點擊已啟動（每 {Constants.AUTO_CLICK_INTERVAL} 秒執行一次）")
+        
+        click_count = 0
+        
+        while not self._auto_skip_stop_event.is_set():
+            try:
+                # 精準等待指定間隔，收到停止信號立即退出
+                if self._auto_skip_stop_event.wait(timeout=Constants.AUTO_CLICK_INTERVAL):
+                    break
+                
+                click_count += 1
+                
+                # 對所有瀏覽器執行點擊（不排除任何瀏覽器）
+                for bt in self.browser_threads:
+                    if self._auto_skip_stop_event.is_set():
+                        break
+                    try:
+                        if not bt.is_browser_alive() or not bt.context:
+                            continue
+                        
+                        driver = bt.context.driver
+                        
+                        # 直接操作 driver，不走任務佇列
+                        rect = BrowserHelper.get_canvas_rect(driver)
+                        if not rect:
+                            continue
+                        
+                        # 點擊跳過按鈕座標
+                        BrowserHelper.click_canvas_position(
+                            driver, rect,
+                            Constants.AUTO_SKIP_CLICK_X_RATIO,
+                            Constants.AUTO_SKIP_CLICK_Y_RATIO
+                        )
+                        # 點擊自動關閉座標
+                        BrowserHelper.click_canvas_position(
+                            driver, rect,
+                            Constants.AUTO_CLOSE_CLICK_X_RATIO,
+                            Constants.AUTO_CLOSE_CLICK_Y_RATIO
+                        )
+                    except Exception:
+                        # 靜默處理錯誤，避免日誌過多
+                        pass
+                
+                # 每 10 次顯示一次統計
+                if click_count % 10 == 0:
+                    self.logger.debug(f"自動跳過已執行 {click_count} 次")
+                    
+            except Exception as e:
+                self.logger.error(f"自動跳過點擊發生錯誤: {e}")
+                self._auto_skip_stop_event.wait(timeout=1.0)
+        
+        self.logger.info(f"自動跳過點擊已停止（共執行 {click_count} 次）")
+    
+    def _start_auto_skip_click(self) -> None:
+        """啟動自動跳過點擊功能（獨立執行緒）。"""
+        if self._auto_skip_running:
+            self.logger.debug("自動跳過點擊功能已在運行中")
+            return
+        
+        self._auto_skip_stop_event.clear()
+        self._auto_skip_thread = threading.Thread(
+            target=self._auto_skip_click_loop,
+            daemon=True,
+            name="AutoSkipClickThread"
+        )
+        self._auto_skip_thread.start()
+        self._auto_skip_running = True
+    
+    def _stop_auto_skip_click(self) -> None:
+        """停止自動跳過點擊功能。"""
+        if not self._auto_skip_running:
+            return
+        
+        self._auto_skip_stop_event.set()
+        
+        if self._auto_skip_thread and self._auto_skip_thread.is_alive():
+            self._auto_skip_thread.join(timeout=2.0)
+        
+        self._auto_skip_thread = None
+        self._auto_skip_running = False
+    
+    # -------------------------------------------------------------------------
+    # 錯誤監控啟動/停止
+    # -------------------------------------------------------------------------
+    
     def _start_error_monitor(self) -> None:
         """啟動錯誤監控功能。"""
         if self.error_monitor_running:
@@ -4100,6 +4135,61 @@ class GameControlCenter:
         
         self.auto_press_threads.clear()
         self.auto_press_running = False
+
+    def _ensure_auto_press_stopped(self) -> None:
+        """確保自動按鍵已完全停止（規則切換時使用）。
+        
+        若自動按鍵正在運行，停止所有執行緒並清理狀態，
+        然後重置停止事件以允許後續操作。
+        """
+        if not self.auto_press_running:
+            return
+        
+        self.logger.info("停止自動按鍵...")
+        self._stop_event.set()
+        
+        for browser_index, thread in list(self.auto_press_threads.items()):
+            if thread and thread.is_alive():
+                thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
+        
+        self.auto_press_threads.clear()
+        self.auto_press_running = False
+        time.sleep(Constants.RULE_SWITCH_WAIT)
+        self.logger.info("自動按鍵已停止")
+        self._stop_event.clear()
+
+    def _log_rule_header(self, message: str) -> None:
+        """輸出規則標頭（含分隔線）。"""
+        self.logger.info("")
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info(message)
+        self.logger.info(Constants.LOG_SEPARATOR)
+        self.logger.info("")
+
+    def _check_stop_and_adjust_betsize(self, amount: float) -> bool:
+        """檢查停止信號並調整所有瀏覽器金額。
+        
+        流程：檢查停止 → 調整金額 → 再次檢查停止。
+        
+        參數:
+            amount: 目標金額
+            
+        回傳:
+            True 表示成功可繼續；False 表示需要中斷或調整失敗
+        """
+        if self._stop_event.is_set() or self._check_time_limit():
+            self.logger.info("[中斷] 收到停止信號，跳過當前規則")
+            return False
+        
+        self.logger.info(f"[步驟 1/2] 調整金額到 {amount}...")
+        if not self._adjust_all_browsers_betsize(amount):
+            return False
+        
+        if self._stop_event.is_set() or self._check_time_limit():
+            self.logger.info("[中斷] 收到停止信號")
+            return False
+        
+        return True
 
     # -------------------------------------------------------------------------
     # 規則執行功能
@@ -4467,31 +4557,18 @@ class GameControlCenter:
         """
         prefix = "[單次]" if rule.once_only else "[循環]"
         
-        self.logger.info("")
-        self.logger.info(Constants.LOG_SEPARATOR)
-        self.logger.info(
+        # 確保自動按鍵已完全停止
+        self._ensure_auto_press_stopped()
+        
+        self._log_rule_header(
             f"【自動旋轉規則 {rule_num}/{total_rules}】{prefix} "
             f"金額 {rule.amount}, 次數 {rule.spin_count}"
         )
-        self.logger.info(Constants.LOG_SEPARATOR)
-        self.logger.info("")
         
-        # 檢查停止信號
-        if self._stop_event.is_set():
-            self.logger.info("[中斷] 收到停止信號，跳過當前規則")
+        if not self._check_stop_and_adjust_betsize(rule.amount):
             return
         
-        # 步驟 1: 調整金額
-        self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
-        if not self._adjust_all_browsers_betsize(rule.amount):
-            return
-        
-        # 檢查停止信號
-        if self._stop_event.is_set():
-            self.logger.info("[中斷] 收到停止信號")
-            return
-        
-        # 步驟 2: 設定自動旋轉（使用內建的 'a' 命令邏輯）
+        # 步驟 2: 設定自動旋轉
         self.logger.info(f"[步驟 2/2] 設定自動旋轉 {rule.spin_count} 次...")
         self._execute_auto_spin_for_all(rule.spin_count)
 
@@ -5218,11 +5295,11 @@ class GameControlCenter:
         # 使用統一的任務函數（DRY 原則）
         buy_free_game_task = self._create_buy_free_game_task(free_game_type)
         
-        # 使用 ThreadPoolExecutor 並行執行
+        # 使用 ThreadPoolExecutor 並行執行（直接操作 driver）
         results = {}
         with ThreadPoolExecutor(max_workers=len(target_browsers)) as executor:
             futures = {
-                executor.submit(bt.execute_task, buy_free_game_task): bt 
+                executor.submit(buy_free_game_task, bt.context): bt 
                 for bt in target_browsers
             }
             
@@ -5291,11 +5368,11 @@ class GameControlCenter:
                     
                     return True
                 
-                # 對成功購買的瀏覽器執行結算
+                # 對成功購買的瀏覽器執行結算（直接操作 driver）
                 settle_results = {}
                 with ThreadPoolExecutor(max_workers=len(successful_browsers)) as executor:
                     futures = {
-                        executor.submit(bt.execute_task, settle_free_game_task): bt 
+                        executor.submit(settle_free_game_task, bt.context): bt 
                         for bt in successful_browsers
                     }
                     
@@ -5600,6 +5677,9 @@ class GameControlCenter:
         # 啟動錯誤訊息監控
         self._start_error_monitor()
         
+        # 啟動自動跳過點擊
+        self._start_auto_skip_click()
+        
         # 自動顯示幫助訊息
         self.show_help()
         
@@ -5672,6 +5752,9 @@ class GameControlCenter:
             # 停止錯誤訊息監控
             self._stop_error_monitor()
             
+            # 停止自動跳過點擊
+            self._stop_auto_skip_click()
+            
             self.running = False
             self.logger.info("控制面板已關閉")
     
@@ -5685,6 +5768,9 @@ class GameControlCenter:
         
         # 停止錯誤訊息監控
         self._stop_error_monitor()
+        
+        # 停止自動跳過點擊
+        self._stop_auto_skip_click()
 
 
 # =============================================================================
