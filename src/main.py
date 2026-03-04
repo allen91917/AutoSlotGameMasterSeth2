@@ -80,6 +80,12 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.webdriver import WebDriver
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import (
+    WebDriverException,
+    StaleElementReferenceException,
+    ElementNotInteractableException,
+    NoSuchElementException,
+)
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
@@ -110,8 +116,8 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "1.0.2"
-    SYSTEM_NAME: str = "威樂戰神賽特二自動化系統"
+    VERSION: str = "1.2.0"
+    SYSTEM_NAME: str = "戰神賽特自動化系統"
     
     # =========================================================================
     # 日誌格式配置
@@ -368,11 +374,22 @@ class Constants:
     BETSIZE_READ_MAX_RETRIES: int = 2          # 讀取金額最大重試次數
     
     # =========================================================================
-    # 網路錯誤關鍵字（用於判斷是否可重試）
+    # 可重試錯誤關鍵字（網路錯誤 + WebDriver 瞬態錯誤）
     # =========================================================================
     NETWORK_ERROR_KEYWORDS: Tuple[str, ...] = (
         'timeout', 'timed out', 'connection', 'network', 'err_',
-        'loading', 'stale'
+        'loading', 'stale', 'symbols not available',
+        'unresolved backtrace', 'element is not reachable',
+        'element click intercepted', 'not interactable',
+        'no such element', 'chrome not reachable',
+        'disconnected', 'session deleted', 'invalid session',
+    )
+    # 可重試的 Selenium 例外類型
+    RETRYABLE_EXCEPTIONS: Tuple[type, ...] = (
+        WebDriverException,
+        StaleElementReferenceException,
+        ElementNotInteractableException,
+        NoSuchElementException,
     )
     
     # -------------------------------------------------------------------------
@@ -1179,26 +1196,28 @@ def get_resource_path(relative_path: str = "") -> Path:
     return base_path
 
 
-def is_network_error(error: Exception) -> bool:
-    """判斷是否為網路相關錯誤（可重試）。
+def is_retryable_error(error: Exception) -> bool:
+    """判斷是否為可重試的錯誤（網路錯誤 + WebDriver 瞬態錯誤）。
 
-    檢查錯誤訊息中是否包含網路相關關鍵字，用於決定是否應該重試操作。
+    除了檢查錯誤訊息中的關鍵字外，也檢查例外類型。
+    WebDriverException（含空 Message）在多瀏覽器並行時常見，屬於可重試錯誤。
 
     參數:
         error: 發生的例外。
 
     回傳:
-        如果是網路相關錯誤則返回 True。
-
-    範例:
-        >>> try:
-        ...     do_something()
-        ... except Exception as e:
-        ...     if is_network_error(e):
-        ...         retry()
+        如果是可重試的錯誤則返回 True。
     """
+    # 1. 檢查例外類型（WebDriverException 及其子類皆可重試）
+    if isinstance(error, Constants.RETRYABLE_EXCEPTIONS):
+        return True
+    # 2. 關鍵字匹配
     error_msg = str(error).lower()
     return any(kw in error_msg for kw in Constants.NETWORK_ERROR_KEYWORDS)
+
+
+# 保留向後相容的別名
+is_network_error = is_retryable_error
 
 
 def cv2_imread_unicode(file_path: Union[str, Path], flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
