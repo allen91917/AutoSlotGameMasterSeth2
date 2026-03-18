@@ -23,7 +23,7 @@
         $ python main_refactor.py
 
 版本資訊:
-    版本: 1.4.0
+    版本: 1.4.1
     作者: 凡臻科技
     授權: MIT License
 
@@ -116,7 +116,7 @@ class Constants:
     # =========================================================================
     # 版本資訊
     # =========================================================================
-    VERSION: str = "1.4.0"
+    VERSION: str = "1.4.1"
     SYSTEM_NAME: str = "威樂賽特二自動化系統"
     
     # =========================================================================
@@ -316,7 +316,7 @@ class Constants:
     # 金額模板配置
     # -------------------------------------------------------------------------
     BETSIZE_DISPLAY_X: float = 0.72
-    BETSIZE_DISPLAY_Y: float = 0.88
+    BETSIZE_DISPLAY_Y: float = 0.90
     BETSIZE_CROP_MARGIN_X: int = 40
     BETSIZE_CROP_MARGIN_Y: int = 12
     
@@ -3329,6 +3329,7 @@ class GameControlCenter:
 
         # 執行緒控制
         self._stop_event = threading.Event()
+        self._auto_press_stop_event = threading.Event()  # 自動按鍵專用停止事件
         self._error_monitor_stop_event = threading.Event()
         self.auto_press_threads: Dict[int, threading.Thread] = {}
         self._error_monitor_thread: Optional[threading.Thread] = None
@@ -4580,7 +4581,7 @@ class GameControlCenter:
         press_count = 0
         username = bt.context.credential.username if bt.context else "Unknown"
         
-        while not self._stop_event.is_set():
+        while not self._auto_press_stop_event.is_set():
             try:
                 # 檢查瀏覽器是否仍然有效
                 if not bt.is_browser_alive():
@@ -4589,23 +4590,19 @@ class GameControlCenter:
                 
                 press_count += 1
                 
-                # 執行按空白鍵
-                def press_space_task(context: BrowserContext) -> bool:
-                    BrowserHelper.execute_cdp_space_key(context.driver)
-                    return True
-                
-                bt.execute_task(press_space_task)
+                # 直接操作 driver 按空白鍵（不走任務佇列）
+                BrowserHelper.execute_cdp_space_key(bt.context.driver)
                 
                 # 每個瀏覽器使用獨立的隨機間隔
                 interval = random.uniform(self.min_interval, self.max_interval)
                 
                 # 使用 wait 而非 sleep，這樣可以立即響應停止信號
-                if self._stop_event.wait(timeout=interval):
+                if self._auto_press_stop_event.wait(timeout=interval):
                     break
                     
             except Exception as e:
                 self.logger.error(f"瀏覽器 {browser_index} ({username}) 操作失敗: {e}")
-                self._stop_event.wait(timeout=1.0)
+                self._auto_press_stop_event.wait(timeout=1.0)
         
         self.logger.info(f"瀏覽器 {browser_index} ({username}) 已停止，共執行 {press_count} 次")
     
@@ -4620,8 +4617,8 @@ class GameControlCenter:
             self.logger.warning("請先使用 's <最小>,<最大>' 命令設定間隔時間")
             return
         
-        # 清除停止事件
-        self._stop_event.clear()
+        # 清除自動按鍵專用停止事件
+        self._auto_press_stop_event.clear()
         self.auto_press_threads.clear()
         
         # 取得活躍的瀏覽器
@@ -4648,8 +4645,8 @@ class GameControlCenter:
             self.logger.warning("自動按鍵未在運行")
             return
         
-        # 設置停止事件
-        self._stop_event.set()
+        # 設置自動按鍵專用停止事件
+        self._auto_press_stop_event.set()
         
         # 等待所有執行緒結束
         stopped_count = 0
@@ -4668,21 +4665,22 @@ class GameControlCenter:
         
         self.auto_press_threads.clear()
         self.auto_press_running = False
-
-        # 重置停止事件，確保後續手動指令（如 b、a、f）可以正常執行
-        self._stop_event.clear()
+        
+        # 重置自動按鍵停止事件，確保後續可重新啟動
+        self._auto_press_stop_event.clear()
 
     def _ensure_auto_press_stopped(self) -> None:
         """確保自動按鍵已完全停止（規則切換時使用）。
         
-        若自動按鍵正在運行，停止所有執行緒並清理狀態，
-        然後重置停止事件以允許後續操作。
+        若自動按鍵正在運行，停止所有執行緒並清理狀態。
+        使用 _auto_press_stop_event 而非 _stop_event，
+        避免影響時間監控等其他使用 _stop_event 的執行緒。
         """
         if not self.auto_press_running:
             return
         
         self.logger.info("停止自動按鍵...")
-        self._stop_event.set()
+        self._auto_press_stop_event.set()
         
         for browser_index, thread in list(self.auto_press_threads.items()):
             if thread and thread.is_alive():
@@ -4692,7 +4690,7 @@ class GameControlCenter:
         self.auto_press_running = False
         time.sleep(Constants.RULE_SWITCH_WAIT)
         self.logger.info("自動按鍵已停止")
-        self._stop_event.clear()
+        self._auto_press_stop_event.clear()
 
     def _log_rule_header(self, message: str) -> None:
         """輸出規則標頭（含分隔線）。"""
@@ -4961,6 +4959,7 @@ class GameControlCenter:
         
         # 最終清理
         if self.auto_press_running:
+            self._auto_press_stop_event.set()  # 確保自動按鍵執行緒收到停止信號
             for browser_index, thread in self.auto_press_threads.items():
                 if thread and thread.is_alive():
                     thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
@@ -4972,9 +4971,20 @@ class GameControlCenter:
         self.logger.info("規則執行已停止")
         self.rule_running = False
         
+        # 停止時間監控線程
+        if self._time_monitor_thread and self._time_monitor_thread.is_alive():
+            self._time_monitor_thread.join(timeout=2.0)
+        self._time_monitor_thread = None
+        
         # 清理時間控制狀態
+        max_hours_was_set = self._rule_execution_max_hours is not None
         self._rule_execution_start_time = None
         self._rule_execution_max_hours = None
+        
+        # 如果是因為時間限制而結束，啟動自動關閉倒數計時
+        if self._time_limit_reached and max_hours_was_set:
+            self._time_limit_reached = False  # 重置標誌
+            self._start_auto_close_countdown()
 
     def _check_time_limit(self) -> bool:
         """檢查是否超過時間限制。
@@ -4994,6 +5004,7 @@ class GameControlCenter:
             self.logger.info(f"已達到執行時間上限 ({self._rule_execution_max_hours} 小時)，停止執行")
             # 設置停止事件，讓所有正在執行的操作（如金額調整、自動按鍵）立即停止
             self._stop_event.set()
+            self._auto_press_stop_event.set()  # 同時停止自動按鍵
             # 標記是因為時間限制而結束
             self._time_limit_reached = True
             return True
@@ -5071,21 +5082,25 @@ class GameControlCenter:
         
         self.logger.info("")
         self.logger.info(Constants.LOG_SEPARATOR)
-        self.logger.info(f"⏰ 規則執行已完成，將在 {int(countdown_seconds)} 秒後自動關閉所有瀏覽器")
+        self.logger.info(f"[計時] 規則執行已完成，將在 {int(countdown_seconds)} 秒後自動關閉所有瀏覽器")
         self.logger.info("   如需取消，請輸入任意命令")
         self.logger.info(Constants.LOG_SEPARATOR)
         self.logger.info("")
         
         def auto_close_browsers() -> None:
-            """自動關閉所有瀏覽器。"""
+            """自動關閉所有瀏覽器並終止程序。"""
             if self.running:
                 self.logger.info("")
-                self.logger.info(f"⏰ {int(countdown_seconds)} 秒已到，自動關閉所有瀏覽器...")
+                self.logger.info(f"[計時] {int(countdown_seconds)} 秒已到，自動關閉所有瀏覽器...")
                 self.logger.info("")
                 # 調用關閉所有瀏覽器的邏輯
                 self._handle_quit_command('0')
                 # 停止控制面板
                 self.running = False
+                # 等待瀏覽器完全關閉後終止程序（關閉終端 console）
+                self.logger.info("程序即將終止...")
+                time.sleep(2.0)
+                os._exit(0)
         
         self._auto_close_timer = threading.Timer(countdown_seconds, auto_close_browsers)
         self._auto_close_timer.daemon = True
@@ -5163,48 +5178,19 @@ class GameControlCenter:
         """
         prefix = "[單次]" if rule.once_only else "[循環]"
         
-        # === 步驟 1: 確保自動按鍵已完全停止 ===
-        if self.auto_press_running:
-            self.logger.info("停止自動按鍵...")
-            self._stop_event.set()
-            
-            for browser_index, thread in list(self.auto_press_threads.items()):
-                if thread and thread.is_alive():
-                    thread.join(timeout=Constants.AUTO_PRESS_THREAD_JOIN_TIMEOUT)
-            
-            self.auto_press_threads.clear()
-            self.auto_press_running = False
-            time.sleep(Constants.RULE_SWITCH_WAIT)
-            self.logger.info("自動按鍵已停止")
-            self._stop_event.clear()
+        # 確保自動按鍵已完全停止
+        self._ensure_auto_press_stopped()
         
-        # 顯示規則資訊
-        self.logger.info("")
-        self.logger.info(Constants.LOG_SEPARATOR)
-        self.logger.info(
+        self._log_rule_header(
             f"【定時旋轉規則 {rule_num}/{total_rules}】{prefix} "
             f"金額 {rule.amount}, 持續 {rule.duration} 分鐘, "
             f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒"
         )
-        self.logger.info(Constants.LOG_SEPARATOR)
-        self.logger.info("")
         
-        # 檢查停止信號
-        if self._stop_event.is_set():
-            self.logger.info("[中斷] 收到停止信號，跳過當前規則")
+        if not self._check_stop_and_adjust_betsize(rule.amount):
             return
         
-        # === 步驟 2: 調整所有瀏覽器的下注金額 ===
-        self.logger.info(f"[步驟 1/2] 調整金額到 {rule.amount}...")
-        if not self._adjust_all_browsers_betsize(rule.amount):
-            return
-        
-        # 檢查停止信號
-        if self._stop_event.is_set():
-            self.logger.info("[中斷] 收到停止信號")
-            return
-        
-        # === 步驟 3: 啟動自動按鍵 ===
+        # 啟動自動按鍵
         self.logger.info(
             f"[步驟 2/2] 啟動自動按鍵 (持續 {rule.duration} 分鐘, "
             f"間隔 {rule.min_seconds}~{rule.max_seconds} 秒)"
@@ -5214,8 +5200,8 @@ class GameControlCenter:
         self.min_interval = rule.min_seconds
         self.max_interval = rule.max_seconds
         
-        # 清除停止事件（確保自動按鍵可以運行）
-        self._stop_event.clear()
+        # 清除自動按鍵停止事件（確保自動按鍵可以運行）
+        self._auto_press_stop_event.clear()
         
         # 取得活躍的瀏覽器
         active_browsers = self._get_active_browsers()
@@ -5242,6 +5228,10 @@ class GameControlCenter:
             if self._stop_event.wait(timeout=check_interval):
                 break
             elapsed_time += check_interval
+            
+            # 檢查時間限制（會自動設置 _stop_event）
+            if self._check_time_limit():
+                break
             
             # 每 60 秒顯示一次剩餘時間
             if int(elapsed_time) % Constants.RULE_PROGRESS_INTERVAL == 0 and elapsed_time > 0:
