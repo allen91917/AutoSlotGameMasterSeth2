@@ -1529,9 +1529,9 @@ class ConfigReader:
         
         for line_number, line in enumerate(lines, start=2):
             try:
-                # 限制最多讀取 3 個帳號
-                if len(credentials) >= 3:
-                    self.logger.info("已達到最大帳號數量限制 (3個)，忽略其餘帳號")
+                # 限制最多讀取 MAX_BROWSER_COUNT 個帳號
+                if len(credentials) >= Constants.MAX_BROWSER_COUNT:
+                    self.logger.info(f"已達到最大帳號數量限制 ({Constants.MAX_BROWSER_COUNT}個)，忽略其餘帳號")
                     break
                 
                 parts = [p.strip() for p in line.split(',')]
@@ -6529,7 +6529,7 @@ class AutoSlotGameAppStarter:
         self.logger.info("")
     
     def _step_determine_browser_count(self) -> int:
-        """步驟 2: 啟動瀏覽器 - 提示使用者輸入數量
+        """步驟 2: 啟動瀏覽器 - 根據帳號數量自動決定
         
         回傳:
             瀏覽器數量
@@ -6538,32 +6538,16 @@ class AutoSlotGameAppStarter:
         self.logger.info("【步驟 2】啟動瀏覽器")
         self.logger.info(Constants.LOG_SEPARATOR)
         
-        max_browsers = len(self.credentials)
+        browser_count = len(self.credentials)
         
-        if max_browsers == 0:
+        if browser_count == 0:
             self.logger.error("沒有可用的使用者憑證")
             return 0
         
-        # 提示使用者輸入瀏覽器數量
-        while True:
-            try:
-                self.logger.info("")
-                print(f"\n請輸入要開啟的瀏覽器數量 (1-{max_browsers}): ", end="", flush=True)
-                user_input = input().strip()
-                browser_count = int(user_input)
-                
-                if 1 <= browser_count <= max_browsers:
-                    self.logger.info(f"將開啟 {browser_count} 個瀏覽器")
-                    self.logger.info("")
-                    return browser_count
-                else:
-                    self.logger.warning(f"請輸入 1 到 {max_browsers} 之間的數字")
-                    
-            except ValueError:
-                self.logger.warning("請輸入有效的數字")
-            except (EOFError, KeyboardInterrupt):
-                self.logger.warning("使用者取消輸入")
-                raise KeyboardInterrupt()
+        # 直接使用帳號數量，不再詢問用戶
+        self.logger.info(f"將開啟 {browser_count} 個瀏覽器")
+        self.logger.info("")
+        return browser_count
     
     def _step_start_proxy_servers(self, browser_count: int) -> List[Optional[int]]:
         """步驟 3: 啟動代理中繼伺服器
